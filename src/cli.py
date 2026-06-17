@@ -1,0 +1,128 @@
+"""manga-voice CLI: analyze / cast / synth / run。
+
+漫画・シナリオ -> 解析 -> キャスティング -> 合成 -> 連結 を統合する。
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from . import assemble as assemble_mod
+from . import tts as tts_mod
+from . import voices as voices_mod
+from .analyze import analyze as analyze_inputs
+from .config import (
+    INPUTS_DIR,
+    SCRIPT_PATH,
+    CharacterBook,
+    Settings,
+    ensure_dirs,
+    load_settings,
+)
+from .models import Script
+
+
+def _save_script(script: Script) -> None:
+    SCRIPT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SCRIPT_PATH.write_text(
+        json.dumps(script.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"[script] 保存: {SCRIPT_PATH}")
+
+
+def _load_script() -> Script:
+    if not SCRIPT_PATH.exists():
+        raise SystemExit(
+            f"script.json が見つかりません: {SCRIPT_PATH}\n先に `analyze` を実行してください。"
+        )
+    return Script.from_dict(json.loads(SCRIPT_PATH.read_text(encoding="utf-8")))
+
+
+def cmd_analyze(args: argparse.Namespace, settings: Settings) -> Script:
+    inputs_dir = Path(args.inputs) if args.inputs else INPUTS_DIR
+    book = CharacterBook.load()
+    script = analyze_inputs(settings, inputs_dir, language=book.language)
+    _save_script(script)
+    return script
+
+
+def cmd_cast(args: argparse.Namespace, settings: Settings) -> CharacterBook:
+    script = _load_script()
+    book = CharacterBook.load()
+    return voices_mod.cast(settings, script, book, apply=args.apply)
+
+
+def cmd_synth(args: argparse.Namespace, settings: Settings) -> None:
+    script = _load_script()
+    book = CharacterBook.load()
+    tts_mod.synth_clips(settings, script, book, scene_id=args.scene, force=args.force)
+    if args.dialogue:
+        tts_mod.synth_dialogue(settings, script, book, scene_id=args.scene, force=args.force)
+    if not args.no_assemble:
+        assemble_mod.assemble_scenes(script, scene_id=args.scene)
+
+
+def cmd_run(args: argparse.Namespace, settings: Settings) -> None:
+    # 1) analyze
+    inputs_dir = Path(args.inputs) if args.inputs else INPUTS_DIR
+    book = CharacterBook.load()
+    script = analyze_inputs(settings, inputs_dir, language=book.language)
+    _save_script(script)
+    # 2) cast (run では自動で書き戻す)
+    book = voices_mod.cast(settings, script, book, apply=True)
+    # 3) synth + 4) assemble
+    tts_mod.synth_clips(settings, script, book, scene_id=args.scene, force=args.force)
+    if args.dialogue:
+        tts_mod.synth_dialogue(settings, script, book, scene_id=args.scene, force=args.force)
+    if not args.no_assemble:
+        assemble_mod.assemble_scenes(script, scene_id=args.scene)
+    print("[run] 完了。output/ を確認してください。")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="manga-voice",
+        description="漫画・シナリオから ElevenLabs v3 でキャラに沿った感情ボイスを自動生成する",
+    )
+    p.add_argument("--model", help="解析に使う Claude モデル (既定 claude-opus-4-8)")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    sp = sub.add_parser("analyze", help="inputs を解析して script.json を生成")
+    sp.add_argument("--inputs", help="入力ディレクトリ (既定 inputs/)")
+    sp.set_defaults(func=cmd_analyze)
+
+    sp = sub.add_parser("cast", help="話者に ElevenLabs ボイスを割当(提案/--applyで保存)")
+    sp.add_argument("--apply", action="store_true", help="characters.json に書き戻す")
+    sp.set_defaults(func=cmd_cast)
+
+    sp = sub.add_parser("synth", help="セリフを音声合成")
+    sp.add_argument("--scene", help="対象シーンID(省略時は全シーン)")
+    sp.add_argument("--force", action="store_true", help="既存音声を再生成")
+    sp.add_argument("--dialogue", action="store_true", help="Text-to-Dialogue 掛け合いも生成")
+    sp.add_argument("--no-assemble", action="store_true", help="clip連結をスキップ")
+    sp.set_defaults(func=cmd_synth)
+
+    sp = sub.add_parser("run", help="解析→割当→合成→連結 を一括実行")
+    sp.add_argument("--inputs", help="入力ディレクトリ (既定 inputs/)")
+    sp.add_argument("--scene", help="対象シーンID(省略時は全シーン)")
+    sp.add_argument("--force", action="store_true", help="既存音声を再生成")
+    sp.add_argument("--dialogue", action="store_true", help="Text-to-Dialogue 掛け合いも生成")
+    sp.add_argument("--no-assemble", action="store_true", help="clip連結をスキップ")
+    sp.set_defaults(func=cmd_run)
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    ensure_dirs()
+    settings = load_settings(model=args.model)
+    args.func(args, settings)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,12 @@
+.env
+.claude/
+__pycache__/
+*.pyc
+.venv/
+venv/
+output/clips/
+output/scenes/
+output/*.json
+
+# inputs/ はリポジトリにコミットして GitHub Actions で処理します。
+# 著作物などコミットしたくない素材は各自 inputs/ 配下に .gitignore 追記で除外してください。

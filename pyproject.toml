@@ -1,0 +1,17 @@
+[project]
+name = "manga-voice"
+version = "0.1.0"
+description = "漫画・シナリオから ElevenLabs v3 でキャラに沿った感情ボイスを自動生成する CLI"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.40.0",
+    "elevenlabs>=1.50.0",
+    "python-dotenv>=1.0.0",
+    "pydub>=0.25.1",
+]
+
+[project.scripts]
+manga-voice = "src.cli:main"
+
+[tool.setuptools]
+packages = ["src"]

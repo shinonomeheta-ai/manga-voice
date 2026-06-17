@@ -1,0 +1,19 @@
+{
+  "_comment": "キャラ名 -> ElevenLabs voice の対応表。voice_id を埋めると固定割当。空のまま cast --apply すると自動補完されます。",
+  "defaults": {
+    "language": "ja",
+    "stability": "natural",
+    "output_format": "mp3_44100_128"
+  },
+  "characters": {
+    "ナレーター": {
+      "voice_id": "",
+      "voice_name": "",
+      "description": "落ち着いた中性的な語り手",
+      "gender": "neutral",
+      "age": "middle_aged",
+      "stability": "robust",
+      "seed": 1001
+    }
+  }
+}

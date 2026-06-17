@@ -1,0 +1,81 @@
+name: Generate Voices
+
+# 手動実行。inputs/ にコミットされた漫画画像・台本を解析して音声を生成し、
+# 成果物(script.json / 音声)を artifact としてアップロードする。
+on:
+  workflow_dispatch:
+    inputs:
+      scene:
+        description: "対象シーンID(空なら全シーン)"
+        required: false
+        default: ""
+      dialogue:
+        description: "Text-to-Dialogue 掛け合いも生成する"
+        type: boolean
+        required: false
+        default: false
+      model:
+        description: "解析に使う Claude モデル"
+        required: false
+        default: "claude-opus-4-8"
+      commit_casting:
+        description: "補完した config/characters.json をコミットして戻す"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ffmpeg (clip連結用)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+        run: |
+          ARGS="run --model '${{ github.event.inputs.model }}'"
+          if [ -n "${{ github.event.inputs.scene }}" ]; then ARGS="$ARGS --scene '${{ github.event.inputs.scene }}'"; fi
+          if [ "${{ github.event.inputs.dialogue }}" = "true" ]; then ARGS="$ARGS --dialogue"; fi
+          echo "manga-voice $ARGS"
+          eval python -m src.cli $ARGS
+
+      - name: Upload generated audio & script
+        uses: actions/upload-artifact@v4
+        with:
+          name: manga-voice-output
+          path: |
+            output/script.json
+            output/clips/**
+            output/scenes/**
+            config/characters.json
+          if-no-files-found: warn
+
+      - name: Commit updated casting
+        if: ${{ github.event.inputs.commit_casting == 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add config/characters.json
+          if git diff --staged --quiet; then
+            echo "characters.json に変更なし"
+          else
+            git commit -m "chore: update voice casting [skip ci]"
+            git push
+          fi
