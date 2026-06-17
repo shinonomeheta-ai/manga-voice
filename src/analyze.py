@@ -7,6 +7,7 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
+from .assets import CharacterAsset
 from .config import Settings
 from .models import Script
 from .prompts import SCRIPT_TOOL, analysis_system_prompt
@@ -43,15 +44,35 @@ def _image_block(path: Path) -> dict[str, Any]:
     }
 
 
-def _build_content(images: list[Path], texts: list[Path]) -> list[dict[str, Any]]:
-    content: list[dict[str, Any]] = []
+def _bible_content(bible: list[CharacterAsset]) -> list[dict[str, Any]]:
+    """キャラ設定資料を、漫画ページより前に置く content ブロックへ変換する。"""
+    if not bible:
+        return []
+    blocks: list[dict[str, Any]] = [{
+        "type": "text",
+        "text": "# キャラクター設定資料（以降の漫画コマの人物同定・演技の基準）",
+    }]
+    for a in bible:
+        header = f"## キャラ: {a.name}"
+        if a.profile:
+            header += f"\n{a.profile}"
+        blocks.append({"type": "text", "text": header})
+        if a.image_path:
+            blocks.append(_image_block(a.image_path))
+    return blocks
+
+
+def _build_content(
+    images: list[Path], texts: list[Path], bible: list[CharacterAsset] | None = None
+) -> list[dict[str, Any]]:
+    content: list[dict[str, Any]] = _bible_content(bible or [])
     for path in texts:
         body = path.read_text(encoding="utf-8", errors="replace")
         content.append({"type": "text", "text": f"# シナリオ/台本ファイル: {path.name}\n{body}"})
     for path in images:
         content.append({"type": "text", "text": f"# 漫画画像: {path.name}"})
         content.append(_image_block(path))
-    if not content:
+    if not images and not texts:
         raise SystemExit(
             "inputs/ に解析対象がありません。漫画画像(.png/.jpg)か台本(.txt/.md)を置いてください。"
         )
@@ -68,20 +89,23 @@ def analyze(
     settings: Settings,
     inputs_dir: Path,
     language: str = "ja",
+    character_bible: list[CharacterAsset] | None = None,
     max_tokens: int = 8000,
 ) -> Script:
-    """inputs を解析して Script を返す。"""
+    """inputs を解析して Script を返す。character_bible があれば話者同定に活用する。"""
     from anthropic import Anthropic  # 遅延import(解析時のみ必要)
 
+    bible = character_bible or []
     images, texts = collect_inputs(inputs_dir)
     client = Anthropic(api_key=settings.anthropic_api_key)
-    content = _build_content(images, texts)
+    content = _build_content(images, texts, bible)
 
-    print(f"[analyze] 画像 {len(images)} 枚 / テキスト {len(texts)} 件 を {settings.model} で解析中…")
+    bible_note = f" / キャラ資料 {len(bible)} 体" if bible else ""
+    print(f"[analyze] 画像 {len(images)} 枚 / テキスト {len(texts)} 件{bible_note} を {settings.model} で解析中…")
     resp = client.messages.create(
         model=settings.model,
         max_tokens=max_tokens,
-        system=analysis_system_prompt(language),
+        system=analysis_system_prompt(language, has_bible=bool(bible)),
         tools=[SCRIPT_TOOL],
         tool_choice={"type": "tool", "name": "record_script"},
         messages=[{"role": "user", "content": content}],

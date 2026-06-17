@@ -10,12 +10,14 @@ import sys
 from pathlib import Path
 
 from . import assemble as assemble_mod
+from . import assets as assets_mod
 from . import notion as notion_mod
 from . import tts as tts_mod
 from . import validate as validate_mod
 from . import voices as voices_mod
 from .analyze import analyze as analyze_inputs
 from .config import (
+    ASSETS_DIR,
     INPUTS_DIR,
     SCRIPT_PATH,
     CharacterBook,
@@ -51,13 +53,23 @@ def cmd_fetch_notion(args: argparse.Namespace, settings: Settings) -> None:
     notion_mod.fetch_page_to_inputs(token, args.page, inputs_dir)
 
 
+def _load_bible(args: argparse.Namespace, book: CharacterBook):
+    assets_dir = Path(args.assets) if getattr(args, "assets", None) else ASSETS_DIR
+    bible = assets_mod.load_character_bible(assets_dir, book)
+    if bible:
+        named = ", ".join(a.name for a in bible)
+        print(f"[bible] キャラ設定資料 {len(bible)} 体を使用: {named}")
+    return bible
+
+
 def cmd_analyze(args: argparse.Namespace, settings: Settings) -> Script:
     inputs_dir = Path(args.inputs) if args.inputs else INPUTS_DIR
     if getattr(args, "notion_page", None):
         notion_mod.fetch_page_to_inputs(require_notion_token(settings), args.notion_page, inputs_dir)
     require_anthropic(settings)
     book = CharacterBook.load()
-    script = analyze_inputs(settings, inputs_dir, language=book.language)
+    bible = _load_bible(args, book)
+    script = analyze_inputs(settings, inputs_dir, language=book.language, character_bible=bible)
     _save_script(script)
     return script
 
@@ -103,7 +115,8 @@ def cmd_run(args: argparse.Namespace, settings: Settings) -> None:
         require_elevenlabs(settings)
     # 1) analyze
     book = CharacterBook.load()
-    script = analyze_inputs(settings, inputs_dir, language=book.language)
+    bible = _load_bible(args, book)
+    script = analyze_inputs(settings, inputs_dir, language=book.language, character_bible=bible)
     _save_script(script)
     # 2) cast (run では自動で書き戻す。dry-run は ElevenLabs を呼ばず既存割当のみ使用)
     if not args.dry_run:
@@ -134,6 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("analyze", help="inputs を解析して script.json を生成")
     sp.add_argument("--inputs", help="入力ディレクトリ (既定 inputs/)")
+    sp.add_argument("--assets", help="キャラ設定資料ディレクトリ (既定 assets/characters/)")
     sp.add_argument("--notion-page", help="解析前にNotionページを取り込む(URL/ID)")
     sp.set_defaults(func=cmd_analyze)
 
@@ -156,6 +170,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("run", help="解析→割当→合成→連結 を一括実行")
     sp.add_argument("--inputs", help="入力ディレクトリ (既定 inputs/)")
+    sp.add_argument("--assets", help="キャラ設定資料ディレクトリ (既定 assets/characters/)")
     sp.add_argument("--notion-page", help="最初にNotionページを取り込む(URL/ID)")
     sp.add_argument("--scene", help="対象シーンID(省略時は全シーン)")
     sp.add_argument("--force", action="store_true", help="既存音声を再生成")

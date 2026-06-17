@@ -25,10 +25,24 @@ EMOTION_VALUES: list[str] = [
 ]
 
 
-def analysis_system_prompt(language: str = "ja") -> str:
+def _bible_clause(has_bible: bool) -> str:
+    if not has_bible:
+        return ""
+    return """
+# キャラクター設定資料(キャラバイブル)
+- 入力の冒頭に「キャラクター設定資料」として、各キャラの顔リファレンス画像と
+  プロフィールを与える。**まず各人物の顔と名前を対応づけ**、以降の漫画コマでは
+  その顔照合に基づいて speaker を一貫した名前で割り当てること。
+- プロフィールの性格・口調・声質に沿って emotion / audio_tags / delivery_note を選ぶ。
+- 資料に無い新規キャラが出たら、見た目から分かる名前を付けて追加してよい。
+"""
+
+
+def analysis_system_prompt(language: str = "ja", has_bible: bool = False) -> str:
     tags = " ".join(V3_AUDIO_TAGS)
     emotions = ", ".join(EMOTION_VALUES)
     return f"""あなたは漫画・シナリオを音声化するための解析ディレクターです。
+{_bible_clause(has_bible)}
 与えられた漫画のコマ画像やシナリオ台本を読み、ElevenLabs v3 (eleven_v3) で
 キャラクターに沿った感情豊かな音声を生成するための構造化台本を作成します。
 
