@@ -5,6 +5,10 @@ name: Generate Voices
 on:
   workflow_dispatch:
     inputs:
+      notion_page:
+        description: "NotionページのURL/ID(指定すると最初に取り込む)"
+        required: false
+        default: ""
       scene:
         description: "対象シーンID(空なら全シーン)"
         required: false
@@ -49,8 +53,10 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
         run: |
           ARGS="run --model '${{ github.event.inputs.model }}'"
+          if [ -n "${{ github.event.inputs.notion_page }}" ]; then ARGS="$ARGS --notion-page '${{ github.event.inputs.notion_page }}'"; fi
           if [ -n "${{ github.event.inputs.scene }}" ]; then ARGS="$ARGS --scene '${{ github.event.inputs.scene }}'"; fi
           if [ "${{ github.event.inputs.dialogue }}" = "true" ]; then ARGS="$ARGS --dialogue"; fi
           echo "manga-voice $ARGS"

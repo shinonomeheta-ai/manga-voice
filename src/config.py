@@ -29,6 +29,7 @@ class Settings:
     anthropic_api_key: str
     elevenlabs_api_key: str
     model: str = DEFAULT_MODEL
+    notion_token: str = ""
 
 
 def load_settings(model: str | None = None) -> Settings:
@@ -36,6 +37,7 @@ def load_settings(model: str | None = None) -> Settings:
     load_dotenv(ROOT / ".env")
     anthropic_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     eleven_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
+    notion_token = os.getenv("NOTION_TOKEN", "").strip()
     chosen_model = (model or os.getenv("MANGA_VOICE_MODEL") or DEFAULT_MODEL).strip()
 
     missing = []
@@ -48,7 +50,16 @@ def load_settings(model: str | None = None) -> Settings:
             f"必要な環境変数が未設定です: {', '.join(missing)}\n"
             f".env.example をコピーして .env を作成し、キーを記入してください。"
         )
-    return Settings(anthropic_key, eleven_key, chosen_model)
+    return Settings(anthropic_key, eleven_key, chosen_model, notion_token)
+
+
+def require_notion_token(settings: Settings) -> str:
+    if not settings.notion_token:
+        raise SystemExit(
+            "NOTION_TOKEN が未設定です。Notion インテグレーションのトークンを "
+            ".env に NOTION_TOKEN として設定してください。"
+        )
+    return settings.notion_token
 
 
 @dataclass

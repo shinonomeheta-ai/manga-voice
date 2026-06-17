@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from . import assemble as assemble_mod
+from . import notion as notion_mod
 from . import tts as tts_mod
 from . import voices as voices_mod
 from .analyze import analyze as analyze_inputs
@@ -20,6 +21,7 @@ from .config import (
     Settings,
     ensure_dirs,
     load_settings,
+    require_notion_token,
 )
 from .models import Script
 
@@ -40,8 +42,16 @@ def _load_script() -> Script:
     return Script.from_dict(json.loads(SCRIPT_PATH.read_text(encoding="utf-8")))
 
 
+def cmd_fetch_notion(args: argparse.Namespace, settings: Settings) -> None:
+    inputs_dir = Path(args.inputs) if args.inputs else INPUTS_DIR
+    token = require_notion_token(settings)
+    notion_mod.fetch_page_to_inputs(token, args.page, inputs_dir)
+
+
 def cmd_analyze(args: argparse.Namespace, settings: Settings) -> Script:
     inputs_dir = Path(args.inputs) if args.inputs else INPUTS_DIR
+    if getattr(args, "notion_page", None):
+        notion_mod.fetch_page_to_inputs(require_notion_token(settings), args.notion_page, inputs_dir)
     book = CharacterBook.load()
     script = analyze_inputs(settings, inputs_dir, language=book.language)
     _save_script(script)
@@ -65,8 +75,11 @@ def cmd_synth(args: argparse.Namespace, settings: Settings) -> None:
 
 
 def cmd_run(args: argparse.Namespace, settings: Settings) -> None:
-    # 1) analyze
+    # 0) Notion から取り込み(任意)
     inputs_dir = Path(args.inputs) if args.inputs else INPUTS_DIR
+    if getattr(args, "notion_page", None):
+        notion_mod.fetch_page_to_inputs(require_notion_token(settings), args.notion_page, inputs_dir)
+    # 1) analyze
     book = CharacterBook.load()
     script = analyze_inputs(settings, inputs_dir, language=book.language)
     _save_script(script)
@@ -89,8 +102,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", help="解析に使う Claude モデル (既定 claude-opus-4-8)")
     sub = p.add_subparsers(dest="command", required=True)
 
+    sp = sub.add_parser("fetch-notion", help="Notionページの画像/テキストを inputs/ に取り込む")
+    sp.add_argument("--page", required=True, help="NotionページのURLまたはID")
+    sp.add_argument("--inputs", help="出力先ディレクトリ (既定 inputs/)")
+    sp.set_defaults(func=cmd_fetch_notion)
+
     sp = sub.add_parser("analyze", help="inputs を解析して script.json を生成")
     sp.add_argument("--inputs", help="入力ディレクトリ (既定 inputs/)")
+    sp.add_argument("--notion-page", help="解析前にNotionページを取り込む(URL/ID)")
     sp.set_defaults(func=cmd_analyze)
 
     sp = sub.add_parser("cast", help="話者に ElevenLabs ボイスを割当(提案/--applyで保存)")
@@ -106,6 +125,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("run", help="解析→割当→合成→連結 を一括実行")
     sp.add_argument("--inputs", help="入力ディレクトリ (既定 inputs/)")
+    sp.add_argument("--notion-page", help="最初にNotionページを取り込む(URL/ID)")
     sp.add_argument("--scene", help="対象シーンID(省略時は全シーン)")
     sp.add_argument("--force", action="store_true", help="既存音声を再生成")
     sp.add_argument("--dialogue", action="store_true", help="Text-to-Dialogue 掛け合いも生成")

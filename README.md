@@ -64,6 +64,26 @@ python -m src.cli run --dialogue
 | `--dialogue` | Text-to-Dialogue で掛け合い音声も生成 |
 | `--format FMT` | 出力フォーマット（既定 `mp3_44100_128`） |
 
+## Notion から取り込む
+
+漫画を Notion ページで管理している場合、ページの画像とテキストを直接取り込めます。
+
+1. **インテグレーション作成**：https://www.notion.so/my-integrations で内部インテグレーションを
+   作成しトークン（`ntn_...`）を取得。`.env` に `NOTION_TOKEN=...` を設定。
+2. **ページを共有**：対象ページの「・・・ → 接続 (Connections)」でそのインテグレーションを追加。
+3. **取り込み**：
+
+```bash
+# Notion ページを inputs/ に展開（画像はDL、テキストは .txt 化）
+python -m src.cli fetch-notion --page "https://www.notion.so/....."
+
+# 取り込み + 解析 + 合成 まで一気通貫
+python -m src.cli run --notion-page "https://www.notion.so/....." --dialogue
+```
+
+> Notion の画像URLは約1時間で失効するため、取り込みは実行時にその場でダウンロードします。
+> 画像の出現位置はテキスト側に `【画像: ファイル名】` として残し、コマ順を解析に伝えます。
+
 ## GitHub Actions で動かす
 
 ローカルに環境を作らず、GitHub 上でパイプラインを実行できます。
@@ -72,6 +92,7 @@ python -m src.cli run --dialogue
    `Settings → Secrets and variables → Actions → New repository secret` で2つ登録:
    - `ANTHROPIC_API_KEY`
    - `ELEVENLABS_API_KEY`
+   - `NOTION_TOKEN`（Notion取り込みを使う場合のみ）
 2. **入力素材をコミット**：`inputs/` に漫画画像や台本(.txt)を追加して push
    （`config/characters.json` に voice_id を事前記入しておくと声が安定します）。
 3. **ワークフローを実行**：`Actions → Generate Voices → Run workflow`。
