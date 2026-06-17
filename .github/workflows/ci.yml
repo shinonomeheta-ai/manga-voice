@@ -17,22 +17,16 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install dependencies (incl. pytest)
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
       - name: Byte-compile (syntax check)
         run: python -m compileall -q src
 
-      - name: Models smoke test (no API)
-        run: |
-          python - <<'PY'
-          from src.models import Script
-          s = Script.from_dict({"scenes": [{"id": "scene-1", "lines": [
-              {"speaker": "太郎", "text": "やったー", "emotion": "excited",
-               "audio_tags": ["[excited]", "[laughs]"]}]}]})
-          line = s.scenes[0].lines[0]
-          assert s.all_speakers() == ["太郎"], s.all_speakers()
-          assert line.resolved_tts_text() == "[excited] [laughs] やったー"
-          assert Script.from_dict(s.to_dict()).all_speakers() == ["太郎"]
-          print("models smoke OK")
-          PY
+      - name: Run tests (offline, no API)
+        run: pytest -q
 
       - name: Validate characters.json
         run: python -c "import json,sys; json.load(open('config/characters.json',encoding='utf-8')); print('characters.json OK')"

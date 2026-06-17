@@ -12,6 +12,7 @@ from pathlib import Path
 from . import assemble as assemble_mod
 from . import notion as notion_mod
 from . import tts as tts_mod
+from . import validate as validate_mod
 from . import voices as voices_mod
 from .analyze import analyze as analyze_inputs
 from .config import (
@@ -21,6 +22,8 @@ from .config import (
     Settings,
     ensure_dirs,
     load_settings,
+    require_anthropic,
+    require_elevenlabs,
     require_notion_token,
 )
 from .models import Script
@@ -52,6 +55,7 @@ def cmd_analyze(args: argparse.Namespace, settings: Settings) -> Script:
     inputs_dir = Path(args.inputs) if args.inputs else INPUTS_DIR
     if getattr(args, "notion_page", None):
         notion_mod.fetch_page_to_inputs(require_notion_token(settings), args.notion_page, inputs_dir)
+    require_anthropic(settings)
     book = CharacterBook.load()
     script = analyze_inputs(settings, inputs_dir, language=book.language)
     _save_script(script)
@@ -59,18 +63,32 @@ def cmd_analyze(args: argparse.Namespace, settings: Settings) -> Script:
 
 
 def cmd_cast(args: argparse.Namespace, settings: Settings) -> CharacterBook:
+    require_anthropic(settings)
+    require_elevenlabs(settings)
     script = _load_script()
     book = CharacterBook.load()
     return voices_mod.cast(settings, script, book, apply=args.apply)
 
 
-def cmd_synth(args: argparse.Namespace, settings: Settings) -> None:
+def cmd_validate(args: argparse.Namespace, settings: Settings) -> None:
     script = _load_script()
     book = CharacterBook.load()
-    tts_mod.synth_clips(settings, script, book, scene_id=args.scene, force=args.force)
+    ok = validate_mod.validate(script, book, scene_id=args.scene)
+    if not ok:
+        raise SystemExit(1)
+
+
+def cmd_synth(args: argparse.Namespace, settings: Settings) -> None:
+    if not args.dry_run:
+        require_elevenlabs(settings)
+    script = _load_script()
+    book = CharacterBook.load()
+    tts_mod.synth_clips(settings, script, book, scene_id=args.scene,
+                        force=args.force, dry_run=args.dry_run)
     if args.dialogue:
-        tts_mod.synth_dialogue(settings, script, book, scene_id=args.scene, force=args.force)
-    if not args.no_assemble:
+        tts_mod.synth_dialogue(settings, script, book, scene_id=args.scene,
+                               force=args.force, dry_run=args.dry_run)
+    if not args.no_assemble and not args.dry_run:
         assemble_mod.assemble_scenes(script, scene_id=args.scene)
 
 
@@ -79,17 +97,24 @@ def cmd_run(args: argparse.Namespace, settings: Settings) -> None:
     inputs_dir = Path(args.inputs) if args.inputs else INPUTS_DIR
     if getattr(args, "notion_page", None):
         notion_mod.fetch_page_to_inputs(require_notion_token(settings), args.notion_page, inputs_dir)
+    # 解析は常に Anthropic が要る。合成・キャスティングは dry-run なら ElevenLabs 不要。
+    require_anthropic(settings)
+    if not args.dry_run:
+        require_elevenlabs(settings)
     # 1) analyze
     book = CharacterBook.load()
     script = analyze_inputs(settings, inputs_dir, language=book.language)
     _save_script(script)
-    # 2) cast (run では自動で書き戻す)
-    book = voices_mod.cast(settings, script, book, apply=True)
+    # 2) cast (run では自動で書き戻す。dry-run は ElevenLabs を呼ばず既存割当のみ使用)
+    if not args.dry_run:
+        book = voices_mod.cast(settings, script, book, apply=True)
     # 3) synth + 4) assemble
-    tts_mod.synth_clips(settings, script, book, scene_id=args.scene, force=args.force)
+    tts_mod.synth_clips(settings, script, book, scene_id=args.scene,
+                        force=args.force, dry_run=args.dry_run)
     if args.dialogue:
-        tts_mod.synth_dialogue(settings, script, book, scene_id=args.scene, force=args.force)
-    if not args.no_assemble:
+        tts_mod.synth_dialogue(settings, script, book, scene_id=args.scene,
+                               force=args.force, dry_run=args.dry_run)
+    if not args.no_assemble and not args.dry_run:
         assemble_mod.assemble_scenes(script, scene_id=args.scene)
     print("[run] 完了。output/ を確認してください。")
 
@@ -116,11 +141,17 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--apply", action="store_true", help="characters.json に書き戻す")
     sp.set_defaults(func=cmd_cast)
 
+    sp = sub.add_parser("validate", help="合成前の事前チェック(APIキー不要)")
+    sp.add_argument("--scene", help="対象シーンID(省略時は全シーン)")
+    sp.set_defaults(func=cmd_validate)
+
     sp = sub.add_parser("synth", help="セリフを音声合成")
     sp.add_argument("--scene", help="対象シーンID(省略時は全シーン)")
     sp.add_argument("--force", action="store_true", help="既存音声を再生成")
     sp.add_argument("--dialogue", action="store_true", help="Text-to-Dialogue 掛け合いも生成")
     sp.add_argument("--no-assemble", action="store_true", help="clip連結をスキップ")
+    sp.add_argument("--dry-run", action="store_true",
+                    help="実APIを呼ばず合成計画をmanifestに書き出す(課金なし)")
     sp.set_defaults(func=cmd_synth)
 
     sp = sub.add_parser("run", help="解析→割当→合成→連結 を一括実行")
@@ -130,12 +161,24 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--force", action="store_true", help="既存音声を再生成")
     sp.add_argument("--dialogue", action="store_true", help="Text-to-Dialogue 掛け合いも生成")
     sp.add_argument("--no-assemble", action="store_true", help="clip連結をスキップ")
+    sp.add_argument("--dry-run", action="store_true",
+                    help="合成は実APIを呼ばず計画のみ(解析は実行)")
     sp.set_defaults(func=cmd_run)
 
     return p
 
 
+def _force_utf8_stdout() -> None:
+    """Windows既定コンソール(cp932)で日本語/記号がエンコード不能になるのを防ぐ。"""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_stdout()
     parser = build_parser()
     args = parser.parse_args(argv)
     ensure_dirs()

@@ -53,6 +53,26 @@ python -m src.cli synth --scene scene-1
 python -m src.cli run --dialogue
 ```
 
+### APIキー無しで確認する（課金前チェック）
+
+```bash
+# script.json と characters.json の整合を事前検査（未割当の声・無効タグ・文字数超過など）
+python -m src.cli validate
+
+# 実APIを呼ばず、合成計画を output/dryrun_*.json に書き出す（ElevenLabs課金なし）
+python -m src.cli synth --dry-run --dialogue
+```
+
+`fetch-notion` / `analyze --notion-page` は Notion トークンのみ、`validate` と
+`synth --dry-run` は **APIキー無し** で動きます（必要なキーだけコマンド単位で要求）。
+
+### テスト
+
+```bash
+pip install pytest
+pytest -q          # API不要のオフラインテスト
+```
+
 主なオプション:
 
 | オプション | 説明 |

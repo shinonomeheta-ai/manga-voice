@@ -33,33 +33,43 @@ class Settings:
 
 
 def load_settings(model: str | None = None) -> Settings:
-    """環境変数からAPIキー等を読む。キー欠落時は分かりやすいエラーを投げる。"""
-    load_dotenv(ROOT / ".env")
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
-    eleven_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
-    notion_token = os.getenv("NOTION_TOKEN", "").strip()
-    chosen_model = (model or os.getenv("MANGA_VOICE_MODEL") or DEFAULT_MODEL).strip()
+    """環境変数からAPIキー等を読む(検証はしない)。
 
-    missing = []
-    if not anthropic_key:
-        missing.append("ANTHROPIC_API_KEY")
-    if not eleven_key:
-        missing.append("ELEVENLABS_API_KEY")
-    if missing:
+    検証は各コマンドが必要なキーだけ require_* で行う。これにより
+    fetch-notion を ElevenLabs/Anthropic キーなしで実行したり、dry-run を
+    キーなしで回したりできる。
+    """
+    load_dotenv(ROOT / ".env")
+    return Settings(
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", "").strip(),
+        elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY", "").strip(),
+        model=(model or os.getenv("MANGA_VOICE_MODEL") or DEFAULT_MODEL).strip(),
+        notion_token=os.getenv("NOTION_TOKEN", "").strip(),
+    )
+
+
+def _require(value: str, env_name: str, hint: str) -> str:
+    if not value:
         raise SystemExit(
-            f"必要な環境変数が未設定です: {', '.join(missing)}\n"
+            f"{env_name} が未設定です。{hint}\n"
             f".env.example をコピーして .env を作成し、キーを記入してください。"
         )
-    return Settings(anthropic_key, eleven_key, chosen_model, notion_token)
+    return value
+
+
+def require_anthropic(settings: Settings) -> str:
+    return _require(settings.anthropic_api_key, "ANTHROPIC_API_KEY",
+                    "漫画/シナリオの解析に必要です。")
+
+
+def require_elevenlabs(settings: Settings) -> str:
+    return _require(settings.elevenlabs_api_key, "ELEVENLABS_API_KEY",
+                    "音声合成(eleven_v3)に必要です。")
 
 
 def require_notion_token(settings: Settings) -> str:
-    if not settings.notion_token:
-        raise SystemExit(
-            "NOTION_TOKEN が未設定です。Notion インテグレーションのトークンを "
-            ".env に NOTION_TOKEN として設定してください。"
-        )
-    return settings.notion_token
+    return _require(settings.notion_token, "NOTION_TOKEN",
+                    "Notion インテグレーションのトークンを設定してください。")
 
 
 @dataclass

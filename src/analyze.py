@@ -7,8 +7,6 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
-from anthropic import Anthropic
-
 from .config import Settings
 from .models import Script
 from .prompts import SCRIPT_TOOL, analysis_system_prompt
@@ -73,6 +71,8 @@ def analyze(
     max_tokens: int = 8000,
 ) -> Script:
     """inputs を解析して Script を返す。"""
+    from anthropic import Anthropic  # 遅延import(解析時のみ必要)
+
     images, texts = collect_inputs(inputs_dir)
     client = Anthropic(api_key=settings.anthropic_api_key)
     content = _build_content(images, texts)

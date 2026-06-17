@@ -10,9 +10,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from anthropic import Anthropic
-from elevenlabs.client import ElevenLabs
-
 from .config import CharacterBook, Settings
 from .models import Character, Script
 from .prompts import VOICE_SELECT_TOOL, voice_selection_prompt
@@ -100,6 +97,9 @@ def cast(
     apply: bool = False,
 ) -> CharacterBook:
     """script の各話者に voice を割り当て、未割当を Claude で補完する。"""
+    from anthropic import Anthropic  # 遅延import
+    from elevenlabs.client import ElevenLabs  # 遅延import
+
     client = ElevenLabs(api_key=settings.elevenlabs_api_key)
     anthropic = Anthropic(api_key=settings.anthropic_api_key)
 
