@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CHARACTERS_PATH = ROOT / "config" / "characters.json"
 ASSETS_DIR = ROOT / "assets" / "characters"
 INPUTS_DIR = ROOT / "inputs"
+RUNS_DIR = ROOT / "runs"
 OUTPUT_DIR = ROOT / "output"
 SCRIPT_PATH = OUTPUT_DIR / "script.json"
 CLIPS_DIR = OUTPUT_DIR / "clips"

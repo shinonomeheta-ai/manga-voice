@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "manga-voice/scenario/1.0",
+  "title": "Scenario",
+  "description": "シナリオ作成エージェントの出力。物語・登場人物・各シーンの台本。",
+  "type": "object",
+  "required": ["version", "title", "characters", "scenes"],
+  "properties": {
+    "version": {"const": "1.0"},
+    "title": {"type": "string"},
+    "logline": {"type": "string", "description": "一文の要約"},
+    "language": {"type": "string", "default": "ja"},
+    "characters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {"type": "string"},
+          "description": {"type": "string", "description": "性格・口調・声質など"},
+          "gender": {"type": "string"},
+          "age": {"type": "string"}
+        }
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "lines"],
+        "properties": {
+          "id": {"type": "string"},
+          "setting": {"type": "string", "description": "場所・状況のト書き"},
+          "summary": {"type": "string"},
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["speaker", "text"],
+              "properties": {
+                "speaker": {"type": "string"},
+                "text": {"type": "string"},
+                "direction": {"type": "string", "description": "演出メモ(任意)"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

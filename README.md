@@ -84,6 +84,48 @@ pytest -q          # API不要のオフラインテスト
 | `--dialogue` | Text-to-Dialogue で掛け合い音声も生成 |
 | `--format FMT` | 出力フォーマット（既定 `mp3_44100_128`） |
 
+## マルチエージェント・パイプライン（シナリオ→作画→音声）
+
+将来的に「シナリオ作成」「作画」「音声作成」をエージェントとして連結するための土台です。
+各エージェントは `runs/<id>/` に成果物を出し、ステージ間は **バージョン付きJSON契約**
+（`schemas/`）で受け渡します。要所に **人間の承認ゲート** が入り、停止→確認→再開できます。
+
+```
+[シナリオ作成] →(承認)→ [作画] →(承認)→ [解析:話者/感情] →(承認)→ [ボイス割当] →(承認)→ [音声合成]
+   scenario          art           analyze              cast            synth
+```
+
+- **連携方式**: `runs/<id>/` の成果物 + `schemas/*.json` 契約（言語非依存・差し替え容易）
+- **人間ゲート**: scenario / art / analyze / cast の各完了後に承認待ちで停止
+- **状態管理**: `runs/<id>/state.json` に各ステージ状態とゲート承認を保存（再開可能）
+- **エージェント**:
+  - `scenario` … 人間が書いた前提（`runs/<id>/scenario/premise.txt`）から台本を生成（Anthropic）
+  - `art` … `manual`（人間が `runs/<id>/art/pages/` にページ画像を配置, 既定）/ `auto`（画像生成=未実装stub）
+  - `analyze` / `cast` / `synth` … 既存の音声処理をラップ（`synth` は `--dry-run` で課金なし）
+
+### 使い方
+
+```bash
+# 1) run を作成（前提を渡すとシナリオ生成まで自動で進む）
+python -m src.cli pipeline new --id demo --premise "理系コメディ。博士と助手のやりとり"
+
+# 2) パイプラインを進める（各ゲート/素材待ちで自動停止）
+python -m src.cli pipeline run --run demo
+
+# 3) 進捗を見る
+python -m src.cli pipeline status --run demo
+
+# 4) 確認したらゲートを承認して続行（差戻しは reject）
+python -m src.cli pipeline approve scenario --run demo
+python -m src.cli pipeline run --run demo
+
+# 全ゲートを自動承認して一気通貫（テスト/全自動）。--dry-run で合成は課金なし
+python -m src.cli pipeline run --run demo --auto-approve --dry-run
+```
+
+作画は `runs/<id>/art/pages/` に画像を置いてから `pipeline run` を再実行 → `approve art`。
+契約スキーマは `schemas/` を参照。
+
 ## キャラクター設定資料で精度を上げる（キャラバイブル）
 
 `assets/characters/` にキャラの**顔リファレンス画像**と**プロフィール**を置いておくと、

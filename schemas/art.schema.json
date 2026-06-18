@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "manga-voice/art/1.0",
+  "title": "ArtManifest",
+  "description": "作画担当エージェントの出力。生成/用意された漫画ページ画像の並び。",
+  "type": "object",
+  "required": ["version", "provider", "pages"],
+  "properties": {
+    "version": {"const": "1.0"},
+    "provider": {"type": "string", "enum": ["manual", "auto"], "description": "manual=人間が用意 / auto=自動生成"},
+    "scenario_ref": {"type": "string", "description": "元シナリオの相対パス"},
+    "pages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["index", "image"],
+        "properties": {
+          "index": {"type": "integer", "description": "読み順(0始まり)"},
+          "scene_id": {"type": "string"},
+          "image": {"type": "string", "description": "run_dir 相対の画像パス"},
+          "caption": {"type": "string"}
+        }
+      }
+    }
+  }
+}

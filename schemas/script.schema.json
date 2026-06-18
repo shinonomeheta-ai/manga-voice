@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "manga-voice/script/1.0",
+  "title": "Script",
+  "description": "音声エージェント(解析)の出力。話者・感情・v3オーディオタグ付きの音声化台本。既存 output/script.json と互換。",
+  "type": "object",
+  "required": ["scenes"],
+  "properties": {
+    "title": {"type": "string"},
+    "language": {"type": "string", "default": "ja"},
+    "characters": {"type": "array", "items": {"type": "string"}},
+    "scenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "lines"],
+        "properties": {
+          "id": {"type": "string"},
+          "description": {"type": "string"},
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["speaker", "text", "tts_text"],
+              "properties": {
+                "speaker": {"type": "string"},
+                "text": {"type": "string"},
+                "emotion": {"type": "string"},
+                "audio_tags": {"type": "array", "items": {"type": "string"}},
+                "delivery_note": {"type": "string"},
+                "tts_text": {"type": "string", "description": "オーディオタグ埋め込み済みの合成用本文"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

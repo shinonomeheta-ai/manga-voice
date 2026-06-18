@@ -82,6 +82,81 @@ def cmd_cast(args: argparse.Namespace, settings: Settings) -> CharacterBook:
     return voices_mod.cast(settings, script, book, apply=args.apply)
 
 
+def _resolve_run(run_id: str | None):
+    from .config import RUNS_DIR
+    from .pipeline.state import RunState
+    if run_id:
+        p = RUNS_DIR / run_id / "state.json"
+        if not p.exists():
+            raise SystemExit(f"run が見つかりません: {run_id}")
+        return RunState.load(p)
+    candidates = sorted(RUNS_DIR.glob("*/state.json"),
+                        key=lambda p: p.stat().st_mtime, reverse=True)
+    if not candidates:
+        raise SystemExit("run がありません。`pipeline new` で作成してください。")
+    return RunState.load(candidates[0])
+
+
+def cmd_pipeline_new(args: argparse.Namespace, settings: Settings) -> None:
+    import datetime
+    from .config import RUNS_DIR
+    from .pipeline import orchestrator as orch
+    from .pipeline.state import RunState
+    run_id = args.id or datetime.datetime.now().strftime("run-%Y%m%d-%H%M%S")
+    run_dir = RUNS_DIR / run_id
+    if (run_dir / "state.json").exists():
+        raise SystemExit(f"既に存在する run です: {run_id}")
+    options = {"art_provider": args.art_provider, "dialogue": bool(args.dialogue)}
+    if args.premise:
+        options["premise"] = args.premise
+    state = RunState.create(run_dir, run_id, options=options)
+    print(f"[pipeline] 作成: {run_id}  ({run_dir})")
+    print(orch.status_table(state))
+    print("次: `pipeline run` で進められます（各ステージの承認/素材待ちで停止します）。")
+
+
+def cmd_pipeline_run(args: argparse.Namespace, settings: Settings) -> None:
+    from .pipeline import orchestrator as orch
+    from .pipeline.registry import default_registry
+    state = _resolve_run(args.run)
+    orch.advance(state, default_registry(), settings=settings, dry_run=args.dry_run,
+                 until=args.until, auto_approve=args.auto_approve)
+    print(orch.status_table(state))
+
+
+def cmd_pipeline_status(args: argparse.Namespace, settings: Settings) -> None:
+    from .pipeline import orchestrator as orch
+    print(orch.status_table(_resolve_run(args.run)))
+
+
+def cmd_pipeline_approve(args: argparse.Namespace, settings: Settings) -> None:
+    state = _resolve_run(args.run)
+    st = state.approve(args.stage)
+    state.save()
+    print(f"[pipeline] 承認: {args.stage} -> {st.status}")
+    print("次: `pipeline run` で続行します。")
+
+
+def cmd_pipeline_reject(args: argparse.Namespace, settings: Settings) -> None:
+    state = _resolve_run(args.run)
+    state.reject(args.stage, args.reason or "")
+    state.save()
+    print(f"[pipeline] 差戻し: {args.stage}（再実行できます）")
+
+
+def cmd_pipeline_list(args: argparse.Namespace, settings: Settings) -> None:
+    from .config import RUNS_DIR
+    from .pipeline.state import RunState
+    runs = sorted(RUNS_DIR.glob("*/state.json"))
+    if not runs:
+        print("(run なし)")
+        return
+    for p in runs:
+        s = RunState.load(p)
+        nxt = s.next_actionable()
+        print(f"- {s.run_id}: 次 = {nxt.name if nxt else '完了'}")
+
+
 def cmd_validate(args: argparse.Namespace, settings: Settings) -> None:
     script = _load_script()
     book = CharacterBook.load()
@@ -179,6 +254,44 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dry-run", action="store_true",
                     help="合成は実APIを呼ばず計画のみ(解析は実行)")
     sp.set_defaults(func=cmd_run)
+
+    # --- マルチエージェント・パイプライン ---
+    pp = sub.add_parser("pipeline", help="シナリオ→作画→音声 を人間承認ゲート付きで連結")
+    psub = pp.add_subparsers(dest="pcommand", required=True)
+
+    sp = psub.add_parser("new", help="新しい run を作成")
+    sp.add_argument("--id", help="run ID(省略時は日時)")
+    sp.add_argument("--premise", help="シナリオの前提(省略時はテンプレを置いて停止)")
+    sp.add_argument("--art-provider", default="manual", choices=["manual", "auto"],
+                    help="作画プロバイダ(既定 manual=人手配置)")
+    sp.add_argument("--dialogue", action="store_true", help="合成でText-to-Dialogueも生成")
+    sp.set_defaults(func=cmd_pipeline_new)
+
+    sp = psub.add_parser("run", help="パイプラインを進める(ゲート/素材待ちで停止)")
+    sp.add_argument("--run", help="run ID(省略時は最新)")
+    sp.add_argument("--until", help="このステージまでで停止")
+    sp.add_argument("--dry-run", action="store_true", help="合成は課金なしの計画のみ")
+    sp.add_argument("--auto-approve", action="store_true",
+                    help="人間ゲートを自動承認して一気通貫(テスト/全自動用)")
+    sp.set_defaults(func=cmd_pipeline_run)
+
+    sp = psub.add_parser("status", help="run の進捗を表示")
+    sp.add_argument("--run", help="run ID(省略時は最新)")
+    sp.set_defaults(func=cmd_pipeline_status)
+
+    sp = psub.add_parser("approve", help="ステージの人間ゲートを承認")
+    sp.add_argument("stage", help="承認するステージ名(scenario/art/analyze/cast)")
+    sp.add_argument("--run", help="run ID(省略時は最新)")
+    sp.set_defaults(func=cmd_pipeline_approve)
+
+    sp = psub.add_parser("reject", help="ステージを差し戻して再実行可能にする")
+    sp.add_argument("stage", help="差し戻すステージ名")
+    sp.add_argument("--reason", help="差戻し理由")
+    sp.add_argument("--run", help="run ID(省略時は最新)")
+    sp.set_defaults(func=cmd_pipeline_reject)
+
+    sp = psub.add_parser("list", help="run 一覧")
+    sp.set_defaults(func=cmd_pipeline_list)
 
     return p
 

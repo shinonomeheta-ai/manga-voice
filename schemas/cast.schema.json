@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "manga-voice/cast/1.0",
+  "title": "Cast",
+  "description": "音声エージェント(キャスティング)の出力。キャラ -> ElevenLabs voice の割当。config/characters.json と互換。",
+  "type": "object",
+  "required": ["characters"],
+  "properties": {
+    "characters": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "voice_id": {"type": "string"},
+          "voice_name": {"type": "string"},
+          "description": {"type": "string"},
+          "gender": {"type": "string"},
+          "age": {"type": "string"},
+          "stability": {"type": "string", "enum": ["creative", "natural", "robust"]},
+          "seed": {"type": "integer"}
+        }
+      }
+    }
+  }
+}
