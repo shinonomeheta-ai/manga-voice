@@ -14,6 +14,51 @@
       "age": "middle_aged",
       "stability": "robust",
       "seed": 1001
+    },
+    "博士": {
+      "voice_id": "",
+      "voice_name": "",
+      "description": "女22歳・無関心でクール。銀髪ポニテの研究者。低め〜中音で淡々、抑揚控えめ",
+      "gender": "female",
+      "age": "young_adult",
+      "stability": "robust",
+      "seed": 2001
+    },
+    "助手くん": {
+      "voice_id": "",
+      "voice_name": "",
+      "description": "男22歳・おとなしく控えめ。黒髪の助手。穏やかな中音でソフト",
+      "gender": "male",
+      "age": "young_adult",
+      "stability": "natural",
+      "seed": 2002
+    },
+    "あおいちゃん": {
+      "voice_id": "",
+      "voice_name": "",
+      "description": "女20歳・おしとやかで上品。銀髪ストレート・青目・華奢。やわらかい中音でゆったり",
+      "gender": "female",
+      "age": "young_adult",
+      "stability": "natural",
+      "seed": 2003
+    },
+    "あかりちゃん": {
+      "voice_id": "",
+      "voice_name": "",
+      "description": "女21歳・元気で天然。明るくにぎやか。高めで張りのある声、早口気味",
+      "gender": "female",
+      "age": "young_adult",
+      "stability": "creative",
+      "seed": 2004
+    },
+    "ななしちゃん": {
+      "voice_id": "",
+      "voice_name": "",
+      "description": "女21歳・明るくおっとり。黒髪紫メッシュ・ゴスロリ。柔らかい中音でゆったり",
+      "gender": "female",
+      "age": "young_adult",
+      "stability": "natural",
+      "seed": 2005
     }
   }
 }

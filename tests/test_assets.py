@@ -21,6 +21,13 @@ def test_load_bible_merges_characters_json_description(tmp_path):
     assert any(a.name == "太郎" and "ノリが良い" in a.profile for a in bible)
 
 
+def test_load_bible_skips_readme(tmp_path):
+    (tmp_path / "README.md").write_text("説明文", encoding="utf-8")
+    (tmp_path / "太郎.png").write_bytes(b"\x89PNG\r\n")
+    names = {a.name for a in load_character_bible(tmp_path)}
+    assert "README" not in names and "太郎" in names
+
+
 def test_load_bible_empty_dir_no_book(tmp_path):
     assert load_character_bible(tmp_path) == []
 

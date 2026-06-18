@@ -34,6 +34,8 @@ def load_character_bible(assets_dir: Path, book: CharacterBook | None = None) ->
             if not p.is_file() or p.name.startswith("."):
                 continue
             stem = p.stem
+            if stem.lower() == "readme":  # フォルダ説明はキャラ扱いしない
+                continue
             asset = names.setdefault(stem, CharacterAsset(name=stem))
             ext = p.suffix.lower()
             if ext in IMAGE_EXT and asset.image_path is None:
