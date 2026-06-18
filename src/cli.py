@@ -107,6 +107,10 @@ def cmd_pipeline_new(args: argparse.Namespace, settings: Settings) -> None:
     if (run_dir / "state.json").exists():
         raise SystemExit(f"既に存在する run です: {run_id}")
     options = {"art_provider": args.art_provider, "dialogue": bool(args.dialogue)}
+    if args.work:
+        from .works import resolve_work
+        resolve_work(args.work)  # 存在チェック(無ければ分かりやすく停止)
+        options["work"] = args.work
     if args.premise:
         options["premise"] = args.premise
     if args.rules:
@@ -166,7 +170,29 @@ def cmd_pipeline_list(args: argparse.Namespace, settings: Settings) -> None:
     for p in runs:
         s = RunState.load(p)
         nxt = s.next_actionable()
-        print(f"- {s.run_id}: 次 = {nxt.name if nxt else '完了'}")
+        work = s.options.get("work", "(default)")
+        print(f"- {s.run_id} [{work}]: 次 = {nxt.name if nxt else '完了'}")
+
+
+def cmd_pipeline_works(args: argparse.Namespace, settings: Settings) -> None:
+    from .works import list_works
+    works = list_works()
+    print("作品一覧（works/）:")
+    print("  (default)  … グローバル設定 config/ + assets/characters/")
+    for w in works:
+        print(f"  {w}")
+    if not works:
+        print("  （works/ 配下はまだありません。`pipeline init-work <名前>` で作成）")
+
+
+def cmd_pipeline_init_work(args: argparse.Namespace, settings: Settings) -> None:
+    from .works import init_work
+    work = init_work(args.name)
+    print(f"[pipeline] 作品を作成: {args.name}  ({work.base})")
+    print(f"  - キャラ割当 : {work.characters_path}")
+    print(f"  - バイブル   : {work.assets_dir}/ に顔画像+プロフィールを置く")
+    print(f"  - 制作ルール : {work.rules_path}")
+    print(f"使い方: `pipeline new --work {args.name} ...`")
 
 
 def cmd_validate(args: argparse.Namespace, settings: Settings) -> None:
@@ -274,9 +300,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp = psub.add_parser("new", help="新しい run を作成")
     sp.add_argument("--id", help="run ID(省略時は日時)")
     sp.add_argument("--premise", help="シナリオの前提(省略時はテンプレを置いて停止)")
+    sp.add_argument("--work", help="作品名(works/<名前>/ の設定を使う。既定はグローバル設定)")
     sp.add_argument("--art-provider", default="manual", choices=["manual", "auto"],
                     help="作画プロバイダ(既定 manual=人手配置)")
-    sp.add_argument("--rules", help="シナリオ制作ルールのパス(既定 config/scenario_rules.md)")
+    sp.add_argument("--rules", help="シナリオ制作ルールのパス(既定は作品/グローバルのルール)")
     sp.add_argument("--neme", help="既成のネーム指示書(markdown)を取り込む(API不要)。"
                                    "指定時はシナリオ生成せずこれを解析")
     sp.add_argument("--dialogue", action="store_true", help="合成でText-to-Dialogueも生成")
@@ -312,6 +339,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = psub.add_parser("list", help="run 一覧")
     sp.set_defaults(func=cmd_pipeline_list)
+
+    sp = psub.add_parser("works", help="作品(works/)の一覧")
+    sp.set_defaults(func=cmd_pipeline_works)
+
+    sp = psub.add_parser("init-work", help="新しい作品 works/<名前>/ を雛形付きで作成")
+    sp.add_argument("name", help="作品名")
+    sp.set_defaults(func=cmd_pipeline_init_work)
 
     return p
 

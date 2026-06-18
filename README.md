@@ -84,6 +84,40 @@ pytest -q          # API不要のオフラインテスト
 | `--dialogue` | Text-to-Dialogue で掛け合い音声も生成 |
 | `--format FMT` | 出力フォーマット（既定 `mp3_44100_128`） |
 
+## 作品（works）— 複数作品を独立管理
+
+作品ごとに **キャラ割当・キャラバイブル・シナリオ制作ルール** を分けられます。
+各作品は `works/<名前>/` に置き、run は `--work <名前>` でその設定を読みます。
+`--work` を付けない run は従来のグローバル設定（`config/` + `assets/characters/`）＝既定作品です。
+
+```
+works/<作品名>/
+├─ characters.json          # この作品のキャラ→ボイス割当
+├─ assets/characters/       # この作品のキャラバイブル（顔画像+プロフィール）
+└─ scenario_rules.md        # この作品のシナリオ制作ルール
+```
+
+```bash
+python -m src.cli pipeline init-work 博士ラボ          # 雛形作成
+python -m src.cli pipeline works                       # 作品一覧
+python -m src.cli pipeline new --work 博士ラボ --neme …  # その作品でrun開始
+```
+
+### シナリオだけ直したいとき（再生成）
+
+ステージは独立成果物なので、必要な所からやり直せます。
+
+```bash
+# 台本(scenario.json)を手で直した → 音声だけ作り直す（作画は保持）
+python -m src.cli pipeline redo analyze --run <id>
+python -m src.cli pipeline run --run <id>
+
+# ネーム/前提を変えた → シナリオから全部作り直す
+python -m src.cli pipeline redo scenario --run <id>
+```
+
+`redo <stage>` は指定ステージと**それ以降**を未実行に戻します（上流は保持）。
+
 ## マルチエージェント・パイプライン（シナリオ→作画→音声）
 
 将来的に「シナリオ作成」「作画」「音声作成」をエージェントとして連結するための土台です。

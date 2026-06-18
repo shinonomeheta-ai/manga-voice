@@ -17,8 +17,9 @@ from .. import assets as assets_mod
 from .. import tts as tts_mod
 from .. import voices as voices_mod
 from ..analyze import IMAGE_EXT, analyze as analyze_inputs
-from ..config import ASSETS_DIR, CharacterBook, require_anthropic, require_elevenlabs
+from ..config import CharacterBook, require_anthropic, require_elevenlabs
 from ..models import Script
+from ..works import work_of
 from .base import AgentResult, RunContext
 
 
@@ -66,8 +67,9 @@ class VoiceAnalyzeAgent:
             return AgentResult.needs_input(
                 "解析対象がありません。先に scenario / art ステージを完了させてください。")
 
-        book = CharacterBook.load()
-        bible = assets_mod.load_character_bible(ASSETS_DIR, book)
+        work = work_of(ctx.options)
+        book = CharacterBook.load(work.characters_path)
+        bible = assets_mod.load_character_bible(work.assets_dir, book)
         script = analyze_inputs(ctx.settings, inputs_dir, language=book.language,
                                 character_bible=bible)
         out = voice_dir / "script.json"
@@ -102,7 +104,7 @@ class VoiceCastAgent:
         require_elevenlabs(ctx.settings)
         voice_dir = ctx.stage_dir("voice")
         script = Script.from_dict(_read_json(voice_dir / "script.json"))
-        book = CharacterBook.load()
+        book = CharacterBook.load(work_of(ctx.options).characters_path)
         book = voices_mod.cast(ctx.settings, script, book, apply=True)
         cast_out = voice_dir / "cast.json"
         _write_json(cast_out, {"characters": {n: c.to_dict() for n, c in book.characters.items()}})
@@ -121,7 +123,7 @@ class VoiceSynthAgent:
             require_elevenlabs(ctx.settings)
         voice_dir = ctx.stage_dir("voice")
         script = Script.from_dict(_read_json(voice_dir / "script.json"))
-        book = CharacterBook.load()
+        book = CharacterBook.load(work_of(ctx.options).characters_path)
         dialogue = bool(ctx.options.get("dialogue", False))
 
         tts_mod.synth_clips(ctx.settings, script, book, dry_run=ctx.dry_run)
