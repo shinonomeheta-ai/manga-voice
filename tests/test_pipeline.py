@@ -105,6 +105,25 @@ def test_reject_resets_to_pending(tmp_path):
     assert st.stages["a"].gate_approved is False
 
 
+def test_redo_from_resets_stage_and_downstream(tmp_path):
+    st = _new_state(tmp_path)
+    orch.advance(st, {"a": OkAgent, "b": OkAgent}, auto_approve=True)
+    assert st.next_actionable() is None  # 全完了
+    reset = st.redo_from("a")
+    assert reset == ["a", "b"]           # a と下流 b
+    assert st.stages["a"].status == S.PENDING
+    assert st.stages["b"].status == S.PENDING
+    assert st.stages["a"].gate_approved is False
+
+
+def test_redo_from_keeps_upstream(tmp_path):
+    st = _new_state(tmp_path)
+    orch.advance(st, {"a": OkAgent, "b": OkAgent}, auto_approve=True)
+    st.redo_from("b")                    # b だけ(下流) / a は保持
+    assert st.stages["a"].status == S.COMPLETED
+    assert st.stages["b"].status == S.PENDING
+
+
 # --- art manual provider ---
 
 def test_art_manual_needs_then_ok(tmp_path):

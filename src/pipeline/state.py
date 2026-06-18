@@ -99,6 +99,26 @@ class RunState:
         st.updated_at = _now()
         return st
 
+    def redo_from(self, name: str) -> list[str]:
+        """指定ステージと、それより下流の全ステージを未実行に戻す。
+
+        シナリオだけ直して下流を作り直したいときに使う。成果物パスの記録もクリアする。
+        戻したステージ名の一覧を返す。
+        """
+        if name not in self.order:
+            raise SystemExit(f"未知のステージ: {name}")
+        idx = self.order.index(name)
+        reset: list[str] = []
+        for n in self.order[idx:]:
+            st = self.stages[n]
+            st.status = PENDING
+            st.gate_approved = False
+            st.outputs = []
+            st.message = ""
+            st.updated_at = _now()
+            reset.append(n)
+        return reset
+
     # --- 永続化 ---
     def save(self) -> None:
         assert self.path is not None

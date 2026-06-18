@@ -148,6 +148,14 @@ def cmd_pipeline_reject(args: argparse.Namespace, settings: Settings) -> None:
     print(f"[pipeline] 差戻し: {args.stage}（再実行できます）")
 
 
+def cmd_pipeline_redo(args: argparse.Namespace, settings: Settings) -> None:
+    state = _resolve_run(args.run)
+    reset = state.redo_from(args.stage)
+    state.save()
+    print(f"[pipeline] 作り直し対象に戻しました: {' → '.join(reset)}")
+    print(f"次: 必要なら入力を直してから `pipeline run` で {args.stage} から再生成します。")
+
+
 def cmd_pipeline_list(args: argparse.Namespace, settings: Settings) -> None:
     from .config import RUNS_DIR
     from .pipeline.state import RunState
@@ -291,11 +299,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--run", help="run ID(省略時は最新)")
     sp.set_defaults(func=cmd_pipeline_approve)
 
-    sp = psub.add_parser("reject", help="ステージを差し戻して再実行可能にする")
+    sp = psub.add_parser("reject", help="ステージを差し戻して再実行可能にする(単一)")
     sp.add_argument("stage", help="差し戻すステージ名")
     sp.add_argument("--reason", help="差戻し理由")
     sp.add_argument("--run", help="run ID(省略時は最新)")
     sp.set_defaults(func=cmd_pipeline_reject)
+
+    sp = psub.add_parser("redo", help="指定ステージ以降をまとめて作り直し(下流も再生成)")
+    sp.add_argument("stage", help="ここから作り直すステージ名(scenario/art/analyze/cast/synth)")
+    sp.add_argument("--run", help="run ID(省略時は最新)")
+    sp.set_defaults(func=cmd_pipeline_redo)
 
     sp = psub.add_parser("list", help="run 一覧")
     sp.set_defaults(func=cmd_pipeline_list)
