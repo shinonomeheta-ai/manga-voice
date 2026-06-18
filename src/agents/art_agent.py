@@ -37,11 +37,14 @@ class ArtAgent:
 
     @staticmethod
     def _manual(ctx: RunContext, art_dir: Path, pages_dir: Path) -> AgentResult:
+        brief_rel = ArtAgent._render_brief(ctx, art_dir)
         images = sorted(p for p in pages_dir.iterdir()
                         if p.is_file() and p.suffix.lower() in IMAGE_EXT)
         if not images:
+            hint = f"（作画指示: {brief_rel} を参照）" if brief_rel else ""
             return AgentResult.needs_input(
-                f"ページ画像がありません。{ctx.rel(pages_dir)} に読み順で画像を置いてから再実行してください。")
+                f"ページ画像がありません。{ctx.rel(pages_dir)} に読み順で画像を置いてから"
+                f"再実行してください。{hint}")
         scenario_ref = "scenario/scenario.json"
         manifest = {
             "version": "1.0", "provider": "manual",
@@ -54,3 +57,21 @@ class ArtAgent:
         out = art_dir / "art.json"
         out.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         return AgentResult.ok([ctx.rel(out)], message=f"{len(images)}ページ")
+
+    @staticmethod
+    def _render_brief(ctx: RunContext, art_dir: Path) -> str:
+        """シナリオ取り込みで得た作画指示(art_brief.json)を人間向け brief.md に整形。"""
+        brief_json = ctx.run_dir / "scenario" / "art_brief.json"
+        if not brief_json.exists():
+            return ""
+        data = json.loads(brief_json.read_text(encoding="utf-8"))
+        lines = ["# 作画ブリーフ（ページ別の画指示）", "",
+                 "各ページを下記の指示に沿って作画し、pages/ に読み順で保存してください。", ""]
+        for page in data.get("pages", []):
+            lines.append(f"## P{page.get('page')}")
+            for pan in page.get("panels", []):
+                lines.append(f"- コマ{pan.get('panel')}: {pan.get('art')}")
+            lines.append("")
+        out = art_dir / "brief.md"
+        out.write_text("\n".join(lines), encoding="utf-8")
+        return ctx.rel(out)

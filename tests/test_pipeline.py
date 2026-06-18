@@ -129,6 +129,44 @@ def test_scenario_needs_premise(tmp_path):
     assert (tmp_path / "scenario" / "premise.txt").exists()
 
 
+NEME_MD = """# 第01話「テスト」
+## ログライン
+（テスト回）
+## ページ別ネーム指示
+### P1
+- コマ1:【画】夜の街 ／【ナレ】「夜が来た」
+- コマ2:【画】男の横顔 ／【セリフ・太郎】「行こう」
+"""
+
+
+def test_scenario_ingest_offline(tmp_path):
+    """--neme 取り込みは API 無しで scenario.json + art_brief.json を出す。"""
+    neme = tmp_path / "neme.md"
+    neme.write_text(NEME_MD, encoding="utf-8")
+    ctx = RunContext(run_dir=tmp_path, options={"scenario_neme": str(neme)})
+    res = ScenarioAgent().run(ctx)
+    assert res.status == "ok"
+    scenario = json.loads((tmp_path / "scenario" / "scenario.json").read_text(encoding="utf-8"))
+    assert scenario["scenes"][0]["lines"][1]["speaker"] == "太郎"
+    assert (tmp_path / "scenario" / "art_brief.json").exists()
+
+
+def test_scenario_ingest_missing_file(tmp_path):
+    ctx = RunContext(run_dir=tmp_path, options={"scenario_neme": str(tmp_path / "none.md")})
+    assert ScenarioAgent().run(ctx).status == "error"
+
+
+def test_art_renders_brief_from_ingest(tmp_path):
+    # 取り込み済みの art_brief.json を置くと art ステージが brief.md を出す
+    (tmp_path / "scenario").mkdir()
+    (tmp_path / "scenario" / "art_brief.json").write_text(json.dumps(
+        {"pages": [{"page": 1, "panels": [{"panel": 1, "art": "夜の街"}]}]}), encoding="utf-8")
+    res = ArtAgent().run(RunContext(run_dir=tmp_path))
+    assert res.status == "needs_input"  # 画像はまだ無い
+    brief = (tmp_path / "art" / "brief.md").read_text(encoding="utf-8")
+    assert "夜の街" in brief and "P1" in brief
+
+
 def test_scenario_rules_injected_into_system(tmp_path):
     from src.agents.scenario_agent import SYSTEM_BASE, build_system, load_rules
     rules_file = tmp_path / "rules.md"

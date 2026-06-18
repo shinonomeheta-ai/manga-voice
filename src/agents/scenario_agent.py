@@ -108,6 +108,12 @@ class ScenarioAgent:
 
     def run(self, ctx: RunContext) -> AgentResult:
         scen_dir = ctx.stage_dir("scenario")
+
+        # 取り込みモード: 既成のネーム指示書(markdown)があれば解析して使う(API不要)
+        neme_path = ctx.options.get("scenario_neme")
+        if neme_path:
+            return self._ingest(ctx, scen_dir, Path(neme_path))
+
         premise_path = scen_dir / "premise.txt"
 
         # premise を CLI/option から渡された場合は書き出す
@@ -142,6 +148,28 @@ class ScenarioAgent:
         n_scenes = len(data.get("scenes", []))
         names = [c.get("name") for c in data.get("characters", [])]
         return AgentResult.ok([ctx.rel(out)], message=f"{n_scenes}シーン / 登場人物 {names}")
+
+    @staticmethod
+    def _ingest(ctx: RunContext, scen_dir: Path, neme_path: Path) -> AgentResult:
+        """既成のネーム指示書(markdown)を scenario.json + 作画ブリーフへ取り込む(API不要)。"""
+        if not neme_path.exists():
+            return AgentResult.error(f"ネーム指示書が見つかりません: {neme_path}")
+        from ..scenario_ingest import parse_neme
+        scenario, art_brief = parse_neme(
+            neme_path.read_text(encoding="utf-8", errors="replace"))
+        if not scenario["scenes"]:
+            return AgentResult.error(
+                "ネームからページ/セリフを抽出できませんでした。"
+                "『ページ別ネーム指示』『### P1』形式か確認してください。")
+        out = scen_dir / "scenario.json"
+        out.write_text(json.dumps(scenario, ensure_ascii=False, indent=2), encoding="utf-8")
+        brief = scen_dir / "art_brief.json"
+        brief.write_text(json.dumps({"pages": art_brief}, ensure_ascii=False, indent=2),
+                         encoding="utf-8")
+        n = sum(len(s["lines"]) for s in scenario["scenes"])
+        return AgentResult.ok(
+            [ctx.rel(out), ctx.rel(brief)],
+            message=f"ネーム取り込み: {len(scenario['scenes'])}ページ / {n}セリフ・ナレ")
 
 
 def _tool_input(resp, tool_name: str) -> dict:

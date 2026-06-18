@@ -99,9 +99,12 @@ pytest -q          # API不要のオフラインテスト
 - **人間ゲート**: scenario / art / analyze / cast の各完了後に承認待ちで停止
 - **状態管理**: `runs/<id>/state.json` に各ステージ状態とゲート承認を保存（再開可能）
 - **エージェント**:
-  - `scenario` … 人間が書いた前提（`runs/<id>/scenario/premise.txt`）から台本を生成（Anthropic）。
-    文体・構成・世界観など「毎回守るルール」は `config/scenario_rules.md` に書くと毎回注入されます
-    （`pipeline new --rules <path>` で別ファイル指定も可）。前提=エピソード固有 / ルール=恒久、の使い分け。
+  - `scenario` … 2モード。
+    - **生成**：前提（`runs/<id>/scenario/premise.txt`）から台本を生成（Anthropic）。文体・構成・
+      世界観など「毎回守るルール」は `config/scenario_rules.md` に書くと毎回注入（`--rules` で別指定可）。
+    - **取り込み**（`pipeline new --neme <ネーム.md>`, **API不要**）：既成のネーム指示書
+      （例: `assets/pachinko-manga` の `/scenario` 出力）を解析し、`scenario.json`（音声用の話者×セリフ）と
+      `art_brief.json`（作画用のページ別【画】指示）へ分解。ネーム1本から音声台本と作画指示の両方を供給。
   - `art` … `manual`（人間が `runs/<id>/art/pages/` にページ画像を配置, 既定）/ `auto`（画像生成=未実装stub）
   - `analyze` / `cast` / `synth` … 既存の音声処理をラップ（`synth` は `--dry-run` で課金なし）
 
@@ -126,7 +129,19 @@ python -m src.cli pipeline run --run demo --auto-approve --dry-run
 ```
 
 作画は `runs/<id>/art/pages/` に画像を置いてから `pipeline run` を再実行 → `approve art`。
+ネーム取り込み時は `runs/<id>/art/brief.md` にページ別の作画指示が出力されるので、それを見て作画します。
 契約スキーマは `schemas/` を参照。
+
+#### 既成ネーム（パチンコ制作キット等）から始める例
+
+```bash
+# /scenario で作ったネーム指示書を取り込んで開始（シナリオ生成はスキップ＝API不要）
+python -m src.cli pipeline new --id ep1 --neme assets/pachinko-manga/出力/第01話_xxx.md
+python -m src.cli pipeline run --run ep1            # 取り込み→scenario承認待ち
+python -m src.cli pipeline approve scenario --run ep1
+python -m src.cli pipeline run --run ep1            # art/brief.md を出力し画像待ち
+# → art/pages/ に作画を配置 → approve art → 解析・割当・合成へ
+```
 
 ## キャラクター設定資料で精度を上げる（キャラバイブル）
 
