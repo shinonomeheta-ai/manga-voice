@@ -109,6 +109,8 @@ def cmd_pipeline_new(args: argparse.Namespace, settings: Settings) -> None:
     options = {"art_provider": args.art_provider, "dialogue": bool(args.dialogue)}
     if args.premise:
         options["premise"] = args.premise
+    if args.rules:
+        options["scenario_rules_path"] = args.rules
     state = RunState.create(run_dir, run_id, options=options)
     print(f"[pipeline] 作成: {run_id}  ({run_dir})")
     print(orch.status_table(state))
@@ -264,6 +266,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--premise", help="シナリオの前提(省略時はテンプレを置いて停止)")
     sp.add_argument("--art-provider", default="manual", choices=["manual", "auto"],
                     help="作画プロバイダ(既定 manual=人手配置)")
+    sp.add_argument("--rules", help="シナリオ制作ルールのパス(既定 config/scenario_rules.md)")
     sp.add_argument("--dialogue", action="store_true", help="合成でText-to-Dialogueも生成")
     sp.set_defaults(func=cmd_pipeline_new)
 

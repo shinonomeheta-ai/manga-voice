@@ -99,7 +99,9 @@ pytest -q          # API不要のオフラインテスト
 - **人間ゲート**: scenario / art / analyze / cast の各完了後に承認待ちで停止
 - **状態管理**: `runs/<id>/state.json` に各ステージ状態とゲート承認を保存（再開可能）
 - **エージェント**:
-  - `scenario` … 人間が書いた前提（`runs/<id>/scenario/premise.txt`）から台本を生成（Anthropic）
+  - `scenario` … 人間が書いた前提（`runs/<id>/scenario/premise.txt`）から台本を生成（Anthropic）。
+    文体・構成・世界観など「毎回守るルール」は `config/scenario_rules.md` に書くと毎回注入されます
+    （`pipeline new --rules <path>` で別ファイル指定も可）。前提=エピソード固有 / ルール=恒久、の使い分け。
   - `art` … `manual`（人間が `runs/<id>/art/pages/` にページ画像を配置, 既定）/ `auto`（画像生成=未実装stub）
   - `analyze` / `cast` / `synth` … 既存の音声処理をラップ（`synth` は `--dry-run` で課金なし）
 

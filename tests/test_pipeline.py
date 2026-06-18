@@ -129,6 +129,32 @@ def test_scenario_needs_premise(tmp_path):
     assert (tmp_path / "scenario" / "premise.txt").exists()
 
 
+def test_scenario_rules_injected_into_system(tmp_path):
+    from src.agents.scenario_agent import SYSTEM_BASE, build_system, load_rules
+    rules_file = tmp_path / "rules.md"
+    rules_file.write_text("- トーン: シリアス\n- 一人称: 僕", encoding="utf-8")
+    ctx = RunContext(run_dir=tmp_path, options={"scenario_rules_path": str(rules_file)})
+    rules = load_rules(ctx)
+    sys_prompt = build_system(rules)
+    assert "シリアス" in sys_prompt and "制作ルール" in sys_prompt
+    assert sys_prompt.startswith(SYSTEM_BASE)
+
+
+def test_scenario_rules_template_sentinel_ignored(tmp_path):
+    from src.agents.scenario_agent import build_system, load_rules
+    rules_file = tmp_path / "rules.md"
+    rules_file.write_text("ここに制作ルールを書いてください", encoding="utf-8")
+    ctx = RunContext(run_dir=tmp_path, options={"scenario_rules_path": str(rules_file)})
+    assert load_rules(ctx) == ""              # 未編集テンプレは無視
+    assert build_system(load_rules(ctx)) == build_system("")  # ルール無し扱い
+
+
+def test_scenario_rules_missing_file(tmp_path):
+    from src.agents.scenario_agent import load_rules
+    ctx = RunContext(run_dir=tmp_path, options={"scenario_rules_path": str(tmp_path / "nope.md")})
+    assert load_rules(ctx) == ""
+
+
 # --- voice agent helper (pure) ---
 
 def test_scenario_to_text():

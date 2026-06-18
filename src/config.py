@@ -17,6 +17,7 @@ DEFAULT_OUTPUT_FORMAT = "mp3_44100_128"
 # プロジェクトルート (このファイルの2つ上 = src/ の親)
 ROOT = Path(__file__).resolve().parent.parent
 CHARACTERS_PATH = ROOT / "config" / "characters.json"
+SCENARIO_RULES_PATH = ROOT / "config" / "scenario_rules.md"
 ASSETS_DIR = ROOT / "assets" / "characters"
 INPUTS_DIR = ROOT / "inputs"
 RUNS_DIR = ROOT / "runs"

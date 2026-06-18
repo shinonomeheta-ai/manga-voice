@@ -11,8 +11,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..config import require_anthropic
+from ..config import SCENARIO_RULES_PATH, require_anthropic
 from .base import AgentResult, RunContext
+
+# テンプレ未編集の目印。これを含む rules ファイルは「未設定」とみなし注入しない。
+RULES_SENTINEL = "ここに制作ルールを書いて"
 
 PREMISE_TEMPLATE = """# 作品の前提（このファイルを書いてから pipeline run を再実行）
 
@@ -74,10 +77,30 @@ SCENARIO_TOOL = {
     },
 }
 
-SYSTEM = """あなたはプロのシナリオライターです。与えられた前提から、音声化と作画を
+SYSTEM_BASE = """あなたはプロのシナリオライターです。与えられた前提から、音声化と作画を
 前提とした台本を作ってください。各シーンを発話(speaker/text)の並びで表現し、地の文は
 speaker を「ナレーター」にします。過剰なト書きは direction に短くまとめ、text には
 読み上げる本文のみを入れます。必ず record_scenario ツールで構造化して返すこと。"""
+
+
+def load_rules(ctx: RunContext) -> str:
+    """恒久のシナリオ制作ルールを読む。options['scenario_rules_path'] 優先、既定は config/。"""
+    raw = ctx.options.get("scenario_rules_path")
+    path = Path(raw) if raw else SCENARIO_RULES_PATH
+    if not path.exists():
+        return ""
+    text = path.read_text(encoding="utf-8", errors="replace").strip()
+    if not text or RULES_SENTINEL in text:
+        return ""  # 未編集テンプレは無視
+    return text
+
+
+def build_system(rules: str) -> str:
+    """ベース指示に制作ルールを最優先ルールとして連結する。"""
+    if rules:
+        return (SYSTEM_BASE
+                + "\n\n# 制作ルール（最優先で厳守すること）\n" + rules)
+    return SYSTEM_BASE
 
 
 class ScenarioAgent:
@@ -101,11 +124,13 @@ class ScenarioAgent:
         from anthropic import Anthropic  # 遅延import
 
         premise = premise_path.read_text(encoding="utf-8")
+        rules = load_rules(ctx)
         client = Anthropic(api_key=ctx.settings.anthropic_api_key)
         model = getattr(ctx.settings, "model", "claude-opus-4-8")
-        print(f"[scenario] {model} で台本を生成中…")
+        rules_note = "制作ルール適用" if rules else "制作ルール未設定"
+        print(f"[scenario] {model} で台本を生成中…（{rules_note}）")
         resp = client.messages.create(
-            model=model, max_tokens=8000, system=SYSTEM,
+            model=model, max_tokens=8000, system=build_system(rules),
             tools=[SCENARIO_TOOL], tool_choice={"type": "tool", "name": "record_scenario"},
             messages=[{"role": "user", "content": f"# 前提\n{premise}"}],
         )
