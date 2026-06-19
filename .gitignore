@@ -11,3 +11,6 @@ runs/
 
 # inputs/ はリポジトリにコミットして GitHub Actions で処理します。
 # 著作物などコミットしたくない素材は各自 inputs/ 配下に .gitignore 追記で除外してください。
+
+# パチンコ作品キットの受け渡し用コピー(文字化け名)。正規版は assets/pachinko-manga/。
+inputs/pachinko-manga/
