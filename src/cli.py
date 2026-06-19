@@ -11,6 +11,7 @@ from pathlib import Path
 
 from . import assemble as assemble_mod
 from . import assets as assets_mod
+from . import audio_fx as fx_mod
 from . import notion as notion_mod
 from . import tts as tts_mod
 from . import validate as validate_mod
@@ -19,6 +20,7 @@ from .analyze import analyze as analyze_inputs
 from .config import (
     ASSETS_DIR,
     INPUTS_DIR,
+    OUTPUT_DIR,
     SCRIPT_PATH,
     CharacterBook,
     Settings,
@@ -217,6 +219,52 @@ def cmd_synth(args: argparse.Namespace, settings: Settings) -> None:
         assemble_mod.assemble_scenes(script, scene_id=args.scene)
 
 
+def cmd_speak(args: argparse.Namespace, settings: Settings) -> None:
+    """テキスト → eleven_v3 で合成 → 整音エフェクト → 出力(一連の単発システム)。"""
+    # テキスト確定
+    text = args.text
+    if args.file:
+        text = Path(args.file).read_text(encoding="utf-8")
+    if not text or not text.strip():
+        raise SystemExit("テキストがありません。`speak \"本文\"` か --file を指定してください。")
+
+    # ボイス確定: --voice(ID) 優先、無ければ --speaker をキャラ表から
+    book = CharacterBook.load()
+    voice_id, stability, seed = args.voice, args.stability or "natural", None
+    if not voice_id and args.speaker:
+        ch = book.get(args.speaker)
+        if not ch or not ch.is_assigned():
+            raise SystemExit(f"話者「{args.speaker}」に voice_id がありません(characters.json/cast)。")
+        voice_id, stability = ch.voice_id, args.stability or ch.stability
+        seed = ch.seed
+    if not voice_id:
+        raise SystemExit("ボイス未指定です。--voice <voice_id> か --speaker <キャラ名> を指定してください。")
+
+    out = Path(args.out) if args.out else OUTPUT_DIR / "speak.mp3"
+    preset = args.preset
+    out_format = book.output_format
+
+    if args.dry_run:
+        print(f"[speak][dry-run] {len(text)}文字 / voice={voice_id} / stability={stability} "
+              f"/ fx={'なし' if args.no_fx else preset} -> {out}")
+        return
+
+    require_elevenlabs(settings)
+    print(f"[speak] 合成中… {len(text)}文字 / voice={voice_id}")
+    audio = tts_mod.synthesize_one(settings, text.strip(), voice_id, stability, seed, out_format)
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if args.no_fx:
+        out.write_bytes(audio)
+        print(f"[speak] 出力(エフェクト無し): {out}")
+        return
+    raw = out.with_suffix(out.suffix + ".raw")
+    raw.write_bytes(audio)
+    fx_mod.apply_fx(raw, out, preset=preset)
+    raw.unlink(missing_ok=True)
+    print(f"[speak] 完了: {out}")
+
+
 def cmd_run(args: argparse.Namespace, settings: Settings) -> None:
     # 0) Notion から取り込み(任意)
     inputs_dir = Path(args.inputs) if args.inputs else INPUTS_DIR
@@ -271,6 +319,20 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("validate", help="合成前の事前チェック(APIキー不要)")
     sp.add_argument("--scene", help="対象シーンID(省略時は全シーン)")
     sp.set_defaults(func=cmd_validate)
+
+    sp = sub.add_parser("speak", help="テキスト→eleven_v3合成→整音→出力(単発)")
+    sp.add_argument("text", nargs="?", help="読み上げる本文")
+    sp.add_argument("--file", help="本文をファイルから読む")
+    sp.add_argument("--voice", help="ElevenLabs voice_id を直接指定")
+    sp.add_argument("--speaker", help="characters.json のキャラ名から voice を引く")
+    sp.add_argument("--out", help="出力パス(既定 output/speak.mp3)")
+    sp.add_argument("--preset", default=fx_mod.DEFAULT_PRESET,
+                    choices=list(fx_mod.PRESETS.keys()), help="整音プリセット(既定 natural)")
+    sp.add_argument("--no-fx", action="store_true", help="整音エフェクトをかけない")
+    sp.add_argument("--stability", choices=["creative", "natural", "robust"],
+                    help="v3 stability(既定はキャラ設定/natural)")
+    sp.add_argument("--dry-run", action="store_true", help="実APIを呼ばず計画のみ表示")
+    sp.set_defaults(func=cmd_speak)
 
     sp = sub.add_parser("synth", help="セリフを音声合成")
     sp.add_argument("--scene", help="対象シーンID(省略時は全シーン)")

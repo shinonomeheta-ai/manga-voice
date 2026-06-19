@@ -70,6 +70,33 @@ def _select_scenes(script: Script, scene_id: str | None) -> list[Scene]:
     return scenes
 
 
+def synthesize_one(
+    settings: Settings,
+    text: str,
+    voice_id: str,
+    stability: str = "natural",
+    seed: int | None = None,
+    output_format: str = "mp3_44100_128",
+) -> bytes:
+    """1テキストを eleven_v3 で合成して音声バイト列を返す(speak用)。"""
+    from elevenlabs.client import ElevenLabs  # 遅延import
+
+    client = ElevenLabs(api_key=settings.elevenlabs_api_key)
+    return _with_retry(
+        lambda: _collect_bytes(
+            client.text_to_speech.convert(
+                voice_id=voice_id,
+                model_id=MODEL_ID,
+                text=text,
+                output_format=output_format,
+                voice_settings={"stability": _stability_value(stability)},
+                **({"seed": seed} if seed is not None else {}),
+            )
+        ),
+        label=f"TTS speak ({voice_id})",
+    )
+
+
 def synth_clips(
     settings: Settings,
     script: Script,

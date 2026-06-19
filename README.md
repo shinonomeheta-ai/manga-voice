@@ -53,6 +53,24 @@ python -m src.cli synth --scene scene-1
 python -m src.cli run --dialogue
 ```
 
+### テキスト→音声→整音 を一発で（speak）
+
+ElevenLabs の画面を使わず、APIにテキストを渡して合成し、**自然に聞こえる整音**を
+かけて出力する単発コマンド。
+
+```bash
+# voice_id を直接指定
+python -m src.cli speak "やったー、ついに終わったぞ！" --voice <voice_id>
+
+# characters.json のキャラ名で指定／整音プリセット／出力先
+python -m src.cli speak "今から遊びに行かない？" --speaker 太郎 --preset warm --out out.mp3
+
+python -m src.cli speak "テスト" --voice <id> --dry-run   # 課金前に計画だけ確認
+```
+
+- 整音プリセット: `natural`(既定・放送品質クリーン) / `clean`(正規化のみ) / `warm`(温かみ・存在感)
+- `--no-fx` で整音オフ。整音には **ffmpeg** が必要（無ければエフェクト無しで出力）。
+
 ### APIキー無しで確認する（課金前チェック）
 
 ```bash
