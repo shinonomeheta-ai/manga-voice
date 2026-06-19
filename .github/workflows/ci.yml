@@ -23,7 +23,9 @@ jobs:
           pip install pytest
 
       - name: Byte-compile (syntax check)
-        run: python -m compileall -q src
+        run: |
+          python -m compileall -q src
+          python -m py_compile streamlit_app.py
 
       - name: Run tests (offline, no API)
         run: pytest -q

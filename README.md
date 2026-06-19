@@ -238,6 +238,35 @@ python -m src.cli run --notion-page "https://www.notion.so/....." --dialogue
 > Notion の画像URLは約1時間で失効するため、取り込みは実行時にその場でダウンロードします。
 > 画像の出現位置はテキスト側に `【画像: ファイル名】` として残し、コマ順を解析に伝えます。
 
+## 友達と共有して使う（Webアプリ）
+
+`streamlit_app.py` は、テキストを入れて生成・再生・ダウンロードできる**共有用Webアプリ**です。
+**あなたのAPIキーは画面に出さず**、パスワードと文字数上限で課金を守ります。
+
+### Streamlit Community Cloud にデプロイ（無料・リンク共有）
+1. [share.streamlit.io](https://share.streamlit.io/) にGitHubでログイン。
+2. このリポジトリ／ブランチ `main`／メインファイル `streamlit_app.py` を指定してデプロイ。
+3. アプリの **Settings → Secrets** に次を設定（`.streamlit/secrets.toml.example` 参照）:
+   ```toml
+   ELEVENLABS_API_KEY = "あなたの共有キー"
+   APP_PASSWORD       = "友達に伝える合言葉"
+   MAX_CHARS          = "500"
+   ```
+4. 発行されたURLと合言葉を友達に共有 → 友達はパスワードを入れて使えます。
+
+整音(ffmpeg)は `packages.txt` で自動インストールされます。
+
+### ローカルで試す
+```bash
+pip install -r requirements.txt
+# .streamlit/secrets.toml を作る（example をコピー）か、環境変数で:
+#   $env:ELEVENLABS_API_KEY="..."; $env:APP_PASSWORD="..."
+streamlit run streamlit_app.py
+```
+
+> 課金メモ: 共有キー方式は**あなたに請求が来ます**。`MAX_CHARS` とパスワードで抑制しつつ、
+> 心配なら ElevenLabs 側で使用量上限/サブキーを設定してください。
+
 ## GitHub Actions で動かす
 
 ローカルに環境を作らず、GitHub 上でパイプラインを実行できます。
