@@ -22,7 +22,7 @@ config/characters.json (補完済み)
    │  synth     … eleven_v3 で個別clip
    ▼
 output/clips/*.mp3
-   │  assemble  … pydub で連結 / text-to-dialogue で掛け合い
+   │  assemble  … pydub で連結（掛け合いが自然になるよう間を動的調整）/ text-to-dialogue
    ▼
 output/scenes/*.mp3
 ```
