@@ -135,20 +135,24 @@ def main() -> None:
         st.subheader("セリフ")
         for i, bid in enumerate(st.session_state.block_ids):
             with st.container(border=True):
+                pick, acts = st.columns([3, 2])
+                # 左: キャラ + セリフ
                 if char_names:
-                    st.selectbox(f"キャラ（ブロック{i + 1}）", char_names, key=f"spk_{bid}")
+                    pick.selectbox(f"キャラ（ブロック{i + 1}）", char_names, key=f"spk_{bid}")
                 else:
-                    st.text_input(f"voice_id（ブロック{i + 1}）", key=f"spk_{bid}")
-                st.text_area("セリフ", key=f"txt_{bid}", height=80,
-                             placeholder="例: いやー、マジで助かったよ…")
-                with st.popover("＋ 感情タグ", use_container_width=True):
+                    pick.text_input(f"voice_id（ブロック{i + 1}）", key=f"spk_{bid}")
+                pick.text_area("セリフ", key=f"txt_{bid}", height=80,
+                               placeholder="例: いやー、マジで助かったよ…")
+                # 右: 感情タグ / このブロックを生成 / 削除
+                with acts.popover("＋ 感情タグ", use_container_width=True):
                     for j, (label, tag) in enumerate(TAG_CHOICES):
                         st.button(label, key=f"tag_{bid}_{j}", use_container_width=True,
                                   on_click=_append_tag_block, args=(bid, tag))
-                if st.button("🔊 このブロックを生成", key=f"gen_{bid}", use_container_width=True):
+                if acts.button("🔊 このブロックを生成", key=f"gen_{bid}", use_container_width=True):
                     _gen_block(settings, chars, bid)
-                if st.button("🗑 削除", key=f"del_{bid}", use_container_width=True):
+                if acts.button("🗑 削除", key=f"del_{bid}", use_container_width=True):
                     remove_id = bid
+                # 生成済み音声はブロック全幅で表示
                 if st.session_state.get(f"audio_{bid}"):
                     st.audio(st.session_state[f"audio_{bid}"], format="audio/mp3")
                     st.download_button("⬇️ このブロックをDL", st.session_state[f"audio_{bid}"],
