@@ -26,11 +26,20 @@ from src.config import DEFAULT_OUTPUT_FORMAT, CharacterBook, Settings
 
 st.set_page_config(page_title="ボイス生成（共有版）", page_icon="🎙️")
 
-# ワンクリック挿入できる eleven_v3 の感情/演出タグ
+# ワンクリック挿入できる感情/演出タグ。(日本語ラベル, 実際に挿入するv3タグ)。
+# v3 は英語タグのみ解釈するため、ボタンは日本語表示・挿入は英語タグのままにする。
 TAG_CHOICES = [
-    "[laughs]", "[sigh]", "[whispers]", "[excited]",
-    "[nervous]", "[gasps]", "[hesitates]", "[pause]",
+    ("笑い", "[laughs]"), ("ため息", "[sigh]"), ("ささやき", "[whispers]"),
+    ("興奮", "[excited]"), ("緊張", "[nervous]"), ("息をのむ", "[gasps]"),
+    ("ためらい", "[hesitates]"), ("間", "[pause]"),
 ]
+
+# 整音プリセットの日本語表示(内部キーは英語のまま)
+PRESET_LABELS = {
+    "natural": "ナチュラル（クリーン整音）",
+    "clean": "最小（音量そろえのみ）",
+    "warm": "ウォーム（温かみ・存在感）",
+}
 
 
 def _secret(name: str, default: str = "") -> str:
@@ -76,6 +85,25 @@ def _postprocess(audio: bytes, preset: str) -> bytes:
         return dst.read_bytes() if dst.exists() else audio
 
 
+def _gen_block(settings: Settings, chars: dict, bid: int) -> None:
+    """1ブロックだけ合成して session_state[audio_<bid>] に保存(整音設定はsecrets/UI値)。"""
+    spk = (st.session_state.get(f"spk_{bid}", "") or "").strip()
+    txt = (st.session_state.get(f"txt_{bid}", "") or "").strip()
+    vid = chars[spk].voice_id if spk in chars else spk
+    if not txt or not vid:
+        st.warning("セリフとキャラ（ボイス）を入れてください。")
+        return
+    preset = st.session_state.get("preset", "natural")
+    do_fx = st.session_state.get("do_fx", True)
+    stab = chars[spk].stability if spk in chars else "natural"
+    try:
+        with st.spinner("生成中…"):
+            a = tts_mod.synthesize_one(settings, txt, vid, stab, None, DEFAULT_OUTPUT_FORMAT)
+            st.session_state[f"audio_{bid}"] = _postprocess(a, preset) if do_fx else a
+    except Exception as e:  # noqa: BLE001
+        st.error(f"生成に失敗しました: {e}")
+
+
 def main() -> None:
     if not _check_password():
         st.stop()
@@ -92,47 +120,49 @@ def main() -> None:
     char_names = list(chars.keys())
 
     st.title("🎙️ ボイス生成（共有版）")
-    st.caption(f"キャラごとにセリフを足して物語を作れます。モデル: **eleven_v3 固定** / "
-               f"合計最大 {max_chars} 文字。タグ例: [laughs] [sigh] [whispers]")
+    st.caption(f"キャラごとにセリフを足して物語を作れます。モデルは **eleven_v3 固定**。"
+               f"合計最大 {max_chars} 文字。")
 
-    # --- ブロック(セリフ)の状態 ---
     if "block_ids" not in st.session_state:
         st.session_state.block_ids = [0]
         st.session_state.block_seq = 1
 
+    left, right = st.columns([3, 1])
+
+    # ===== 左: セリフ（キャラごとのブロック）=====
     remove_id = None
-    for i, bid in enumerate(st.session_state.block_ids):
-        with st.container(border=True):
-            c1, c2, c3 = st.columns([2, 6, 1])
-            if char_names:
-                c1.selectbox("キャラ", char_names, key=f"spk_{bid}")
-            else:
-                c1.text_input("voice_id", key=f"spk_{bid}")
-            c2.text_area(f"セリフ {i + 1}", key=f"txt_{bid}", height=80,
-                         placeholder="例: いやー、マジで助かったよ…")
-            with c2.popover("＋ 感情タグ"):
-                tcols = st.columns(4)
-                for j, t in enumerate(TAG_CHOICES):
-                    tcols[j % 4].button(t, key=f"tag_{bid}_{j}", use_container_width=True,
-                                        on_click=_append_tag_block, args=(bid, t))
-            if c3.button("🗑", key=f"del_{bid}", help="このブロックを削除"):
-                remove_id = bid
+    with left:
+        st.subheader("セリフ")
+        for i, bid in enumerate(st.session_state.block_ids):
+            with st.container(border=True):
+                if char_names:
+                    st.selectbox(f"キャラ（ブロック{i + 1}）", char_names, key=f"spk_{bid}")
+                else:
+                    st.text_input(f"voice_id（ブロック{i + 1}）", key=f"spk_{bid}")
+                st.text_area("セリフ", key=f"txt_{bid}", height=80,
+                             placeholder="例: いやー、マジで助かったよ…")
+                with st.popover("＋ 感情タグ", use_container_width=True):
+                    for j, (label, tag) in enumerate(TAG_CHOICES):
+                        st.button(label, key=f"tag_{bid}_{j}", use_container_width=True,
+                                  on_click=_append_tag_block, args=(bid, tag))
+                if st.button("🔊 このブロックを生成", key=f"gen_{bid}", use_container_width=True):
+                    _gen_block(settings, chars, bid)
+                if st.button("🗑 削除", key=f"del_{bid}", use_container_width=True):
+                    remove_id = bid
+                if st.session_state.get(f"audio_{bid}"):
+                    st.audio(st.session_state[f"audio_{bid}"], format="audio/mp3")
+                    st.download_button("⬇️ このブロックをDL", st.session_state[f"audio_{bid}"],
+                                       file_name=f"block_{bid}.mp3", mime="audio/mp3", key=f"dl_{bid}")
+        if st.button("＋ ブロックを追加", use_container_width=True):
+            st.session_state.block_ids.append(st.session_state.block_seq)
+            st.session_state.block_seq += 1
+            st.rerun()
 
     if remove_id is not None and len(st.session_state.block_ids) > 1:
         st.session_state.block_ids = [b for b in st.session_state.block_ids if b != remove_id]
         st.rerun()
 
-    if st.button("＋ ブロックを追加"):
-        st.session_state.block_ids.append(st.session_state.block_seq)
-        st.session_state.block_seq += 1
-        st.rerun()
-
-    o1, o2 = st.columns(2)
-    preset = o1.selectbox("整音プリセット", list(fx_mod.PRESETS.keys()), index=0,
-                          help="natural=クリーン / clean=正規化のみ / warm=温かみ")
-    do_fx = o2.checkbox("整音エフェクトをかける", value=True)
-
-    # --- ブロックを収集 ---
+    # 全ブロックを収集
     lines: list[dict[str, str]] = []
     stabs: list[str] = []
     total = 0
@@ -148,27 +178,34 @@ def main() -> None:
         stabs.append(chars[spk].stability if spk in chars else "natural")
         total += len(txt)
 
-    st.caption(f"合計 {total} / {max_chars} 文字")
-    over = total > max_chars
-
-    if over:
-        st.warning(f"合計 {total} 文字が上限 {max_chars} を超えています。減らしてください。")
-
-    if st.button("🔊 生成する", type="primary", disabled=not lines or over):
-        try:
-            with st.spinner("生成中…（数秒）"):
-                if len(lines) == 1:
-                    audio = tts_mod.synthesize_one(
-                        settings, lines[0]["text"], lines[0]["voice_id"],
-                        stabs[0], None, DEFAULT_OUTPUT_FORMAT)
-                else:
-                    audio = tts_mod.synthesize_dialogue_bytes(settings, lines, DEFAULT_OUTPUT_FORMAT)
-                final = _postprocess(audio, preset) if do_fx else audio
-            st.success("できました！")
-            st.audio(final, format="audio/mp3")
-            st.download_button("⬇️ ダウンロード", final, file_name="voice.mp3", mime="audio/mp3")
-        except Exception as e:  # noqa: BLE001
-            st.error(f"生成に失敗しました: {e}")
+    # ===== 右: 設定 ＋ まとめて生成 =====
+    with right:
+        st.subheader("設定")
+        preset = st.selectbox("整音プリセット", list(fx_mod.PRESETS.keys()), index=0,
+                              format_func=lambda k: PRESET_LABELS.get(k, k), key="preset")
+        do_fx = st.checkbox("整音エフェクトをかける", value=True, key="do_fx")
+        st.caption(f"合計 {total} / {max_chars} 文字")
+        over = total > max_chars
+        if over:
+            st.warning("文字数が上限を超えています。減らしてください。")
+        if st.button("🔊 全部つなげて生成", type="primary", disabled=not lines or over,
+                     use_container_width=True):
+            try:
+                with st.spinner("生成中…（数秒）"):
+                    if len(lines) == 1:
+                        audio = tts_mod.synthesize_one(
+                            settings, lines[0]["text"], lines[0]["voice_id"],
+                            stabs[0], None, DEFAULT_OUTPUT_FORMAT)
+                    else:
+                        audio = tts_mod.synthesize_dialogue_bytes(settings, lines, DEFAULT_OUTPUT_FORMAT)
+                    st.session_state["audio_all"] = _postprocess(audio, preset) if do_fx else audio
+            except Exception as e:  # noqa: BLE001
+                st.session_state.pop("audio_all", None)
+                st.error(f"生成に失敗しました: {e}")
+        if st.session_state.get("audio_all"):
+            st.audio(st.session_state["audio_all"], format="audio/mp3")
+            st.download_button("⬇️ まとめてDL", st.session_state["audio_all"],
+                               file_name="story.mp3", mime="audio/mp3", key="dl_all")
 
 
 main()
