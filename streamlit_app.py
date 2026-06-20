@@ -20,7 +20,7 @@ import streamlit as st
 from src import audio_fx as fx_mod
 from src import tts as tts_mod
 from src import voices as voices_mod
-from src.config import DEFAULT_OUTPUT_FORMAT, Settings
+from src.config import DEFAULT_OUTPUT_FORMAT, CharacterBook, Settings
 
 st.set_page_config(page_title="ボイス生成（共有版）", page_icon="🎙️")
 
@@ -84,22 +84,37 @@ def main() -> None:
     text = st.text_area("読み上げるテキスト", height=150, max_chars=max_chars,
                         placeholder="やったー、ついにテスト終わったぞ！")
 
-    # ボイス選択: アカウントの一覧から、無ければ手入力
-    voices = _account_voices(api_key)
-    if voices:
-        labels = [f"{n}（{vid[:8]}…）" for n, vid in voices]
-        default_id = _secret("DEFAULT_VOICE_ID")
-        idx = next((i for i, (_, vid) in enumerate(voices) if vid == default_id), 0)
-        choice = st.selectbox("ボイス", range(len(voices)),
-                              format_func=lambda i: labels[i], index=idx)
-        voice_id = voices[choice][1]
+    # ボイス選択: ①characters.json のキャラ表(voice_id登録済み) → ②アカウント一覧 → ③手入力
+    char_stability = "natural"
+    char_seed = None
+    chars = [(n, c) for n, c in CharacterBook.load().characters.items() if c.is_assigned()]
+    if chars:
+        labels = [f"{n}（{c.voice_name or c.voice_id[:8]}）" for n, c in chars]
+        labels.append("― voice_id を直接入力 ―")
+        sel = st.selectbox("キャラ / ボイス", range(len(labels)), format_func=lambda i: labels[i])
+        if sel < len(chars):
+            c = chars[sel][1]
+            voice_id, char_stability, char_seed = c.voice_id, c.stability, c.seed
+        else:
+            voice_id = st.text_input("voice_id", value=_secret("DEFAULT_VOICE_ID"))
     else:
-        voice_id = st.text_input("voice_id", value=_secret("DEFAULT_VOICE_ID"))
+        voices = _account_voices(api_key)
+        if voices:
+            labels = [f"{n}（{vid[:8]}…）" for n, vid in voices]
+            default_id = _secret("DEFAULT_VOICE_ID")
+            idx = next((i for i, (_, vid) in enumerate(voices) if vid == default_id), 0)
+            choice = st.selectbox("ボイス", range(len(voices)),
+                                  format_func=lambda i: labels[i], index=idx)
+            voice_id = voices[choice][1]
+        else:
+            voice_id = st.text_input("voice_id", value=_secret("DEFAULT_VOICE_ID"))
 
     c1, c2 = st.columns(2)
     preset = c1.selectbox("整音プリセット", list(fx_mod.PRESETS.keys()), index=0,
                           help="natural=クリーン / clean=正規化のみ / warm=温かみ")
-    stability = c2.selectbox("声の安定度", ["natural", "creative", "robust"], index=0)
+    stab_opts = ["natural", "creative", "robust"]
+    stability = c2.selectbox("声の安定度", stab_opts,
+                             index=stab_opts.index(char_stability) if char_stability in stab_opts else 0)
     do_fx = st.checkbox("整音エフェクトをかける", value=True)
 
     if st.button("🔊 生成する", type="primary",
@@ -107,7 +122,7 @@ def main() -> None:
         try:
             with st.spinner("生成中…（数秒）"):
                 audio = tts_mod.synthesize_one(
-                    settings, text.strip(), voice_id, stability, None, DEFAULT_OUTPUT_FORMAT)
+                    settings, text.strip(), voice_id, stability, char_seed, DEFAULT_OUTPUT_FORMAT)
                 final = _postprocess(audio, preset) if do_fx else audio
             st.success("できました！")
             st.audio(final, format="audio/mp3")

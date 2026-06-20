@@ -1,5 +1,5 @@
 {
-  "_comment": "キャラ名 -> ElevenLabs voice の対応表。voice_id を埋めると固定割当。空のまま cast --apply すると自動補完されます。",
+  "_comment": "キャラ名 -> ElevenLabs voice の対応表。voice_id を埋めると固定割当。空のまま cast --apply すると自動補完されます。Webアプリの選択肢にも使われます。",
   "defaults": {
     "language": "ja",
     "stability": "natural",
@@ -7,13 +7,49 @@
   },
   "characters": {
     "ナレーター": {
-      "voice_id": "",
-      "voice_name": "",
+      "voice_id": "deKmbWEKZdwxcKxxcfvP",
+      "voice_name": "菊木舞子",
       "description": "落ち着いた中性的な語り手",
       "gender": "neutral",
       "age": "middle_aged",
       "stability": "robust",
       "seed": 1001
+    },
+    "桐原": {
+      "voice_id": "4sirbXwrtRlmPV80MJkQ",
+      "voice_name": "ソラ",
+      "description": "元業界紙記者の探偵。落ち着いた解説役",
+      "gender": "male",
+      "age": "adult",
+      "stability": "robust",
+      "seed": 3001
+    },
+    "九頭竜": {
+      "voice_id": "8FuuqoKHuM48hIEwni5e",
+      "voice_name": "翔平",
+      "description": "保身で不正に走る小悪党。気弱で言い訳がち",
+      "gender": "male",
+      "age": "adult",
+      "stability": "natural",
+      "seed": 3002
+    },
+    "悪い人": {
+      "voice_id": "H8ZPDxbrPcks5hEsi2fq",
+      "voice_name": "浩一",
+      "description": "悪役。掴みどころのないトリックスター",
+      "gender": "male",
+      "age": "adult",
+      "stability": "natural",
+      "seed": 3003
+    },
+    "もぶ": {
+      "voice_id": "LIisRj2veIKEBdr6KZ5y",
+      "voice_name": "Hadou",
+      "description": "モブ・脇役用の汎用ボイス",
+      "gender": "neutral",
+      "age": "adult",
+      "stability": "natural",
+      "seed": 3004
     },
     "博士": {
       "voice_id": "",
