@@ -4,14 +4,16 @@
 > まず [/CLAUDE.md](../CLAUDE.md) を読み、次にここで現状を把握する。最終更新: 2026-06-20。
 
 ## ▶ 次にやること（NEXT）— 「次なにすべき？」はまずここを即答
-- **いますぐ**: 共有Webアプリを**実キーでローカル起動確認**
-  （`.streamlit/secrets.toml` に `ELEVENLABS_API_KEY`/`APP_PASSWORD` → `streamlit run streamlit_app.py`）。
-- **その後**: Streamlit Community Cloud にデプロイ → Secrets 設定 → URL＋合言葉で友達に共有。
+- **済**: 共有Webアプリを **Streamlit Cloud にデプロイ済み**（リポジトリは public 化）。
+  URL: https://manga-voice-kqkvw8ih63slfyoc4byquf.streamlit.app/ （APP_PASSWORDで保護）。
+  キャラ別ブロックで物語を組む＋eleven_v3固定＋感情タグ挿入＋掛け合い(Text-to-Dialogue)に対応。
+- **いますぐ**: 新UIを実機確認 — キャラ別にセリフブロックを足して **🔊生成**（掛け合い）→ 友達にURL＋合言葉を共有。
+- **課金の安全確認**: ElevenLabs の **Auto Top Up / 使用量課金を OFF** のままにする（上限超過で自動課金されないように）。APIキー側のクレジット上限も設定済み(3万)。
 - **やりたくなったら**:
-  - 「各自が自分のキーを入れる」モード追加（あなたの課金ゼロ運用）
-  - 掛け合い: Text-to-Dialogue をシーン既定化 / `gap_ms` を実音声で微調整
+  - 「各自が自分のキーを入れる」モード（あなたの課金ゼロ運用）
+  - 口語変換(Claude)ボタン / 話速・スタイル調整 / `gap_ms`を実音声で微調整
   - パチンコ作品で `/scenario` から1話作成 → `pipeline --neme` で取り込み→音声化
-- **保留**: API実機の本番検証一式（ElevenLabs/Anthropic キー、eleven_v3は有料プラン）。
+- **保留**: API実機の本番検証一式（eleven_v3は有料プラン）。
 
 > このリストは作業の区切りごとに更新する（増えたら上を最新の最優先に並べ替え）。
 

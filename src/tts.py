@@ -97,6 +97,28 @@ def synthesize_one(
     )
 
 
+def synthesize_dialogue_bytes(
+    settings: Settings,
+    inputs: list[dict[str, str]],
+    output_format: str = "mp3_44100_128",
+) -> bytes:
+    """複数話者のセリフ inputs=[{text, voice_id}] を Text-to-Dialogue(v3)で一括合成。
+
+    1リクエストで掛け合いを生成するため、個別合成より自然なやり取りになる。
+    """
+    from elevenlabs.client import ElevenLabs  # 遅延import
+
+    client = ElevenLabs(api_key=settings.elevenlabs_api_key)
+    return _with_retry(
+        lambda: _collect_bytes(
+            client.text_to_dialogue.convert(
+                inputs=inputs, model_id=MODEL_ID, output_format=output_format
+            )
+        ),
+        label=f"Dialogue ({len(inputs)} lines)",
+    )
+
+
 def synth_clips(
     settings: Settings,
     script: Script,
