@@ -104,6 +104,44 @@ def _gen_block(settings: Settings, chars: dict, bid: int) -> None:
         st.error(f"生成に失敗しました: {e}")
 
 
+def _script_to_blocks(script, char_names: list[str]) -> None:
+    """解析結果(Script)を、編集可能なブロック(session_state)へ展開する。"""
+    for k in [k for k in list(st.session_state.keys()) if str(k).startswith("audio_")]:
+        del st.session_state[k]  # 旧ブロックの生成音声をクリア
+    seq = 0
+    st.session_state.block_ids = []
+    for scene in script.scenes:
+        for line in scene.lines:
+            bid = seq
+            seq += 1
+            st.session_state.block_ids.append(bid)
+            spk = line.speaker if line.speaker in char_names else (
+                char_names[0] if char_names else line.speaker)
+            st.session_state[f"spk_{bid}"] = spk
+            st.session_state[f"txt_{bid}"] = line.resolved_tts_text()
+    if not st.session_state.block_ids:
+        st.session_state.block_ids = [0]
+    st.session_state.block_seq = max(seq, 1)
+
+
+def _transcribe_images(settings: Settings, files, char_names: list[str]) -> None:
+    """ドラッグ&ドロップした漫画画像を Claude Vision で解析し、感情付き台本に変換。"""
+    import tempfile
+    from src import assets as assets_mod
+    from src.analyze import analyze as analyze_inputs
+    from src.config import ASSETS_DIR, CharacterBook
+
+    with tempfile.TemporaryDirectory() as d:
+        for k, f in enumerate(files):
+            ext = (Path(f.name).suffix or ".png").lower()
+            (Path(d) / f"page_{k:03d}{ext}").write_bytes(f.getvalue())
+        book = CharacterBook.load()
+        bible = assets_mod.load_character_bible(ASSETS_DIR, book)
+        script = analyze_inputs(settings, Path(d), language=book.language,
+                                character_bible=bible)
+    _script_to_blocks(script, char_names)
+
+
 def main() -> None:
     if not _check_password():
         st.stop()
@@ -112,7 +150,8 @@ def main() -> None:
     if not api_key:
         st.error("管理者へ: Secrets に ELEVENLABS_API_KEY を設定してください。")
         st.stop()
-    settings = Settings(anthropic_api_key="", elevenlabs_api_key=api_key)
+    settings = Settings(anthropic_api_key=_secret("ANTHROPIC_API_KEY"),
+                        elevenlabs_api_key=api_key)
     max_chars = int(_secret("MAX_CHARS", "800") or 800)
 
     book = CharacterBook.load()
@@ -132,6 +171,22 @@ def main() -> None:
     # ===== 左: セリフ（キャラごとのブロック）=====
     remove_id = None
     with left:
+        # 画像から感情付きで自動台本化(Claude Vision)
+        with st.expander("🖼 画像から自動で台本化（感情付き文字起こし）"):
+            if not settings.anthropic_api_key:
+                st.info("この機能は Secrets に ANTHROPIC_API_KEY（Claude）を追加すると使えます。")
+            ups = st.file_uploader("漫画画像をドラッグ&ドロップ（複数可）",
+                                   type=["png", "jpg", "jpeg", "webp"],
+                                   accept_multiple_files=True, key="tr_imgs")
+            if st.button("文字起こし→台本に反映", disabled=not (settings.anthropic_api_key and ups)):
+                try:
+                    with st.spinner("解析中…（Claudeが画像を読み取り）"):
+                        _transcribe_images(settings, ups, char_names)
+                    st.success("台本に反映しました。下のブロックを確認・編集してください。")
+                    st.rerun()
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"文字起こしに失敗しました: {e}")
+
         st.caption("台本（番号順に読み上げ）")
         for i, bid in enumerate(st.session_state.block_ids):
             with st.container(border=True):
@@ -153,17 +208,9 @@ def main() -> None:
                     _gen_block(settings, chars, bid)
                 if hdr[4].button("🗑", key=f"del_{bid}", use_container_width=True, help="削除"):
                     remove_id = bid
-                # 下段: 漫画サムネ + セリフ
-                thumb, body = st.columns([1, 5])
-                if st.session_state.get(f"img_{bid}"):
-                    thumb.image(st.session_state[f"img_{bid}"], use_container_width=True)
-                with thumb.popover("🖼", use_container_width=True, help="漫画サムネを紐付け"):
-                    up = st.file_uploader("画像", type=["png", "jpg", "jpeg", "webp"],
-                                          key=f"up_{bid}", label_visibility="collapsed")
-                    if up is not None:
-                        st.session_state[f"img_{bid}"] = up.getvalue()
-                body.text_area("セリフ", key=f"txt_{bid}", height=80,
-                               label_visibility="collapsed", placeholder="セリフ…")
+                # セリフ(全幅)
+                st.text_area("セリフ", key=f"txt_{bid}", height=80,
+                             label_visibility="collapsed", placeholder="セリフ…")
                 # 生成済み音声
                 if st.session_state.get(f"audio_{bid}"):
                     st.audio(st.session_state[f"audio_{bid}"], format="audio/mp3")
