@@ -14,7 +14,9 @@ packages.txt の ffmpeg で有効化される。
 """
 from __future__ import annotations
 
+import datetime
 import io
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -107,6 +109,7 @@ def _gen_block(settings: Settings, chars: dict, bid: int) -> None:
             raw = tts_mod.synthesize_one(settings, txt, vid, stab, None, DEFAULT_OUTPUT_FORMAT)
             st.session_state[f"audioN_{bid}"] = _postprocess(raw, "natural")
             st.session_state[f"audioW_{bid}"] = _postprocess(raw, "warm")
+            _add_history(f"{spk}「{txt[:16]}」", st.session_state[f"audioN_{bid}"])
     except Exception as e:  # noqa: BLE001
         st.error(f"生成に失敗しました: {e}")
 
@@ -134,6 +137,20 @@ def _lines_of(script, char_names: list[str]) -> list[tuple[str, str]]:
                 char_names[0] if char_names else line.speaker)
             out.append((spk, line.resolved_tts_text()))
     return out
+
+
+def _add_history(label: str, audio: bytes) -> None:
+    """生成した音声をセッションの履歴に積む(最新12件・リロードまで保持)。"""
+    hist = st.session_state.setdefault("history", [])
+    ts = datetime.datetime.now().strftime("%H:%M:%S")
+    hist.append({"label": f"{ts} {label}", "audio": audio})
+    del hist[:-12]
+
+
+def _project_pairs() -> list[tuple[str, str]]:
+    """現在のブロック内容(speaker, text)を順に取り出す。"""
+    return [(st.session_state.get(f"spk_{b}", ""), st.session_state.get(f"txt_{b}", ""))
+            for b in st.session_state.get("block_ids", [])]
 
 
 def _set_blocks(pairs: list[tuple[str, str]]) -> None:
@@ -192,53 +209,88 @@ def main() -> None:
         st.session_state.block_ids = [0]
         st.session_state.block_seq = 1
 
+    # ===== 左サイドバー: 画像から自動で台本化(Claude Vision) =====
+    with st.sidebar:
+        st.header("🖼 画像から台本化")
+        st.caption("感情付きで文字起こし")
+        if not settings.anthropic_api_key:
+            st.info("Secrets に ANTHROPIC_API_KEY（Claude）を追加すると使えます。")
+
+        # クリップボードから貼り付け(コピーした画像をそのまま)
+        if paste_image_button is not None:
+            res = paste_image_button("📋 画像を貼り付け", key="paste_btn")
+            if getattr(res, "image_data", None) is not None:
+                buf = io.BytesIO()
+                res.image_data.save(buf, format="PNG")
+                st.session_state["pasted_img"] = buf.getvalue()
+        else:
+            st.caption("※ 貼り付けボタン未導入（streamlit-paste-button）")
+
+        if st.session_state.get("pasted_img"):
+            st.image(st.session_state["pasted_img"], use_container_width=True, caption="貼り付け画像")
+            if st.button("貼り付けを取り消し", key="clear_paste", use_container_width=True):
+                st.session_state.pop("pasted_img", None)
+                st.rerun()
+
+        ups = st.file_uploader("またはD&D／ファイル選択（複数可）",
+                               type=["png", "jpg", "jpeg", "webp"],
+                               accept_multiple_files=True, key="tr_imgs")
+
+        items: list[tuple[str, bytes]] = []
+        for f in ups or []:
+            items.append((Path(f.name).suffix or ".png", f.getvalue()))
+        if st.session_state.get("pasted_img"):
+            items.append((".png", st.session_state["pasted_img"]))
+
+        if st.button("文字起こし→台本に反映", use_container_width=True,
+                     disabled=not (settings.anthropic_api_key and items)):
+            try:
+                with st.spinner("解析中…（Claudeが画像を読み取り）"):
+                    _transcribe_images(settings, items, char_names)
+                st.session_state.pop("pasted_img", None)
+                st.success("台本に反映しました。")
+                st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"文字起こしに失敗しました: {e}")
+
+        # --- プロジェクト管理(JSONで保存/読込: クラウドでも消えない) ---
+        st.divider()
+        st.header("💾 プロジェクト")
+        proj = {"version": 1,
+                "blocks": [{"speaker": s, "text": t} for s, t in _project_pairs()]}
+        st.download_button("⬇️ 保存（JSON）", json.dumps(proj, ensure_ascii=False, indent=2),
+                           file_name="project.json", mime="application/json",
+                           use_container_width=True, key="proj_dl")
+        upj = st.file_uploader("📂 読み込み（JSON）", type=["json"], key="proj_up")
+        if upj is not None and st.button("読み込む", use_container_width=True, key="proj_load"):
+            try:
+                data = json.loads(upj.getvalue().decode("utf-8"))
+                _set_blocks([(b.get("speaker", ""), b.get("text", ""))
+                             for b in data.get("blocks", [])])
+                st.success("読み込みました。")
+                st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"読み込み失敗: {e}")
+
+        # --- 生成履歴(セッション内・リロードまで保持) ---
+        st.divider()
+        st.header("🕘 生成履歴")
+        hist = st.session_state.get("history", [])
+        if not hist:
+            st.caption("まだありません（生成すると追加）")
+        else:
+            if st.button("履歴をクリア", use_container_width=True, key="hist_clear"):
+                st.session_state["history"] = []
+                st.rerun()
+            for idx, h in enumerate(reversed(hist)):
+                st.caption(h["label"])
+                st.audio(h["audio"], format="audio/mp3")
+
     left, right = st.columns([4, 1])
 
     # ===== 左: セリフ（キャラごとのブロック）=====
     remove_id = None
     with left:
-        # 画像から感情付きで自動台本化(Claude Vision)
-        with st.expander("🖼 画像から自動で台本化（感情付き文字起こし）", expanded=True):
-            if not settings.anthropic_api_key:
-                st.info("この機能は Secrets に ANTHROPIC_API_KEY（Claude）を追加すると使えます。")
-
-            # クリップボードから貼り付け(コピーした画像をそのまま)
-            if paste_image_button is not None:
-                res = paste_image_button("📋 画像を貼り付け（コピーした画像）", key="paste_btn")
-                if getattr(res, "image_data", None) is not None:
-                    buf = io.BytesIO()
-                    res.image_data.save(buf, format="PNG")
-                    st.session_state["pasted_img"] = buf.getvalue()
-            else:
-                st.caption("※ 貼り付けボタンは未導入（requirementsに streamlit-paste-button）。")
-
-            if st.session_state.get("pasted_img"):
-                st.image(st.session_state["pasted_img"], width=180, caption="貼り付け画像")
-                if st.button("貼り付けを取り消し", key="clear_paste"):
-                    st.session_state.pop("pasted_img", None)
-                    st.rerun()
-
-            ups = st.file_uploader("またはドラッグ&ドロップ／ファイル選択（複数可）",
-                                   type=["png", "jpg", "jpeg", "webp"],
-                                   accept_multiple_files=True, key="tr_imgs")
-
-            items: list[tuple[str, bytes]] = []
-            for f in ups or []:
-                items.append((Path(f.name).suffix or ".png", f.getvalue()))
-            if st.session_state.get("pasted_img"):
-                items.append((".png", st.session_state["pasted_img"]))
-
-            if st.button("文字起こし→台本に反映",
-                         disabled=not (settings.anthropic_api_key and items)):
-                try:
-                    with st.spinner("解析中…（Claudeが画像を読み取り）"):
-                        _transcribe_images(settings, items, char_names)
-                    st.session_state.pop("pasted_img", None)
-                    st.success("台本に反映しました。下のブロックを確認・編集してください。")
-                    st.rerun()
-                except Exception as e:  # noqa: BLE001
-                    st.error(f"文字起こしに失敗しました: {e}")
-
         st.caption("台本（番号順に読み上げ）")
         for i, bid in enumerate(st.session_state.block_ids):
             with st.container(border=True):
@@ -337,6 +389,7 @@ def main() -> None:
                     else:
                         audio = tts_mod.synthesize_dialogue_bytes(settings, lines, DEFAULT_OUTPUT_FORMAT)
                     st.session_state["audio_all"] = _postprocess(audio, preset) if do_fx else audio
+                    _add_history(f"掛け合い {len(lines)}行", st.session_state["audio_all"])
             except Exception as e:  # noqa: BLE001
                 st.session_state.pop("audio_all", None)
                 st.error(f"生成に失敗しました: {e}")
