@@ -27,15 +27,15 @@ def test_password_gate_blocks_without_auth():
     assert "ログイン" in titles
 
 
-def test_emotion_tag_button_appends_to_block():
-    """ブロックの感情タグボタンを押すと、そのブロックのテキスト末尾にタグが入る。"""
+def test_tone_tag_button_inserts_at_front():
+    """ブロックのトーンタグボタンを押すと、そのブロックの文頭にタグが入る。"""
     at = AppTest.from_file("streamlit_app.py")
     at.secrets["ELEVENLABS_API_KEY"] = "dummy"   # パスワード無し→本体UIに到達
     at.run()
     assert not at.exception
-    btn = next(b for b in at.button if b.key == "tag_0_0")  # ブロック0の [laughs]
+    btn = next(b for b in at.button if b.key == "tag_0_0")  # ブロック0の [excited]
     btn.click().run()
-    assert "[laughs]" in at.session_state["txt_0"]
+    assert at.session_state["txt_0"].startswith("[excited]")
 
 
 def test_add_block_increases_blocks():

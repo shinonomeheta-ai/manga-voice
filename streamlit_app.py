@@ -32,12 +32,14 @@ from src.config import DEFAULT_OUTPUT_FORMAT, CharacterBook, Settings
 
 st.set_page_config(page_title="ボイス生成（共有版）", page_icon="🎙️", layout="wide")
 
-# ワンクリック挿入できる感情/演出タグ。(日本語ラベル, 実際に挿入するv3タグ)。
-# v3 は英語タグのみ解釈するため、ボタンは日本語表示・挿入は英語タグのままにする。
+# トーン(声の調子)タグのみ。(日本語ラベル, 実際に挿入するv3タグ)。
+# 反応・効果音系([laughs]/[sigh]/[gasps]等)は非言語音が入るので含めない。
+# v3 は英語タグのみ解釈するため、ボタンは日本語表示・挿入は英語タグにする。
 TAG_CHOICES = [
-    ("笑い", "[laughs]"), ("ため息", "[sigh]"), ("ささやき", "[whispers]"),
-    ("興奮", "[excited]"), ("緊張", "[nervous]"), ("息をのむ", "[gasps]"),
-    ("ためらい", "[hesitates]"), ("間", "[pause]"),
+    ("興奮", "[excited]"), ("うれしい", "[happy]"), ("明るい", "[cheerful]"),
+    ("緊張", "[nervous]"), ("悲しげ", "[sad]"), ("怒り", "[angry]"),
+    ("落ち着き", "[calm]"), ("真剣", "[serious]"), ("驚き", "[surprised]"),
+    ("皮肉", "[sarcastic]"), ("やさしい", "[warm]"), ("ささやき", "[whispers]"),
 ]
 
 # 整音プリセットの日本語表示(内部キーは英語のまま)
@@ -73,12 +75,11 @@ def _check_password() -> bool:
     return False
 
 
-def _append_tag_block(block_id: int, tag: str) -> None:
-    """指定ブロックのテキスト末尾にタグを足す(ボタンの on_click から呼ぶ)。"""
+def _insert_tone_tag(block_id: int, tag: str) -> None:
+    """トーンタグを文頭に挿入する(v3はタグ直後の言い方を変えるため先頭が基本)。"""
     key = f"txt_{block_id}"
-    cur = st.session_state.get(key, "")
-    sep = "" if (not cur or cur[-1:] in " \n") else " "
-    st.session_state[key] = f"{cur}{sep}{tag} "
+    cur = (st.session_state.get(key, "") or "").lstrip()
+    st.session_state[key] = f"{tag} {cur}".rstrip()
 
 
 def _postprocess(audio: bytes, preset: str) -> bytes:
@@ -110,29 +111,8 @@ def _gen_block(settings: Settings, chars: dict, bid: int) -> None:
         st.error(f"生成に失敗しました: {e}")
 
 
-def _script_to_blocks(script, char_names: list[str]) -> None:
-    """解析結果(Script)を、編集可能なブロック(session_state)へ展開する。"""
-    for k in [k for k in list(st.session_state.keys()) if str(k).startswith("audio")]:
-        del st.session_state[k]  # 旧ブロックの生成音声をクリア
-    seq = 0
-    st.session_state.block_ids = []
-    for scene in script.scenes:
-        for line in scene.lines:
-            bid = seq
-            seq += 1
-            st.session_state.block_ids.append(bid)
-            spk = line.speaker if line.speaker in char_names else (
-                char_names[0] if char_names else line.speaker)
-            st.session_state[f"spk_{bid}"] = spk
-            st.session_state[f"txt_{bid}"] = line.resolved_tts_text()
-    if not st.session_state.block_ids:
-        st.session_state.block_ids = [0]
-    st.session_state.block_seq = max(seq, 1)
-
-
-def _transcribe_images(settings: Settings, items: list[tuple[str, bytes]],
-                       char_names: list[str]) -> None:
-    """漫画画像(拡張子, バイト列)を Claude Vision で解析し、感情付き台本に変換。"""
+def _analyze_images(settings: Settings, items: list[tuple[str, bytes]]):
+    """漫画画像(拡張子, バイト列)を Claude Vision で解析し Script を返す。"""
     from src import assets as assets_mod
     from src.analyze import analyze as analyze_inputs
     from src.config import ASSETS_DIR, CharacterBook
@@ -142,9 +122,50 @@ def _transcribe_images(settings: Settings, items: list[tuple[str, bytes]],
             (Path(d) / f"page_{k:03d}{(ext or '.png').lower()}").write_bytes(data)
         book = CharacterBook.load()
         bible = assets_mod.load_character_bible(ASSETS_DIR, book)
-        script = analyze_inputs(settings, Path(d), language=book.language,
-                                character_bible=bible)
-    _script_to_blocks(script, char_names)
+        return analyze_inputs(settings, Path(d), language=book.language,
+                              character_bible=bible)
+
+
+def _lines_of(script, char_names: list[str]) -> list[tuple[str, str]]:
+    out = []
+    for scene in script.scenes:
+        for line in scene.lines:
+            spk = line.speaker if line.speaker in char_names else (
+                char_names[0] if char_names else line.speaker)
+            out.append((spk, line.resolved_tts_text()))
+    return out
+
+
+def _set_blocks(pairs: list[tuple[str, str]]) -> None:
+    """(speaker, text) の並びでブロックを作り直す(idは0から振り直し)。"""
+    for k in [k for k in list(st.session_state.keys()) if str(k).startswith("audio")]:
+        del st.session_state[k]
+    if not pairs:
+        pairs = [("", "")]
+    ids = []
+    for seq, (spk, txt) in enumerate(pairs):
+        st.session_state[f"spk_{seq}"] = spk
+        st.session_state[f"txt_{seq}"] = txt
+        ids.append(seq)
+    st.session_state.block_ids = ids
+    st.session_state.block_seq = len(ids)
+
+
+def _transcribe_images(settings: Settings, items: list[tuple[str, bytes]],
+                       char_names: list[str]) -> None:
+    """画像群を解析し、台本全体を作り直す(トップの取り込み用)。"""
+    _set_blocks(_lines_of(_analyze_images(settings, items), char_names))
+
+
+def _transcribe_into_block(settings: Settings, items, char_names: list[str], bid: int) -> None:
+    """画像を解析し、その結果を bid の位置に差し込む(ブロックへのD&D用)。"""
+    new = _lines_of(_analyze_images(settings, items), char_names)
+    if not new:
+        return
+    snap = [(st.session_state.get(f"spk_{b}", ""), st.session_state.get(f"txt_{b}", ""))
+            for b in st.session_state.block_ids]
+    pos = st.session_state.block_ids.index(bid)
+    _set_blocks(snap[:pos] + new + snap[pos + 1:])
 
 
 def main() -> None:
@@ -221,8 +242,8 @@ def main() -> None:
         st.caption("台本（番号順に読み上げ）")
         for i, bid in enumerate(st.session_state.block_ids):
             with st.container(border=True):
-                # 上段: 番号 + 話者 + アイコン操作(感情タグ/生成/削除)
-                hdr = st.columns([1, 5, 1, 1, 1])
+                # 上段: 番号 + 話者 + アイコン操作(画像/感情タグ/生成/削除)
+                hdr = st.columns([1, 5, 1, 1, 1, 1])
                 hdr[0].markdown(f"### {i + 1}")
                 if char_names:
                     hdr[1].selectbox("キャラ", char_names, key=f"spk_{bid}",
@@ -230,14 +251,26 @@ def main() -> None:
                 else:
                     hdr[1].text_input("voice_id", key=f"spk_{bid}",
                                       label_visibility="collapsed")
-                with hdr[2].popover("🎭", use_container_width=True, help="感情タグを挿入"):
+                with hdr[2].popover("🖼", use_container_width=True, help="画像から文字起こしして差し込む"):
+                    bup = st.file_uploader("画像をドロップ", type=["png", "jpg", "jpeg", "webp"],
+                                           accept_multiple_files=True, key=f"bimg_{bid}")
+                    bitems = [(Path(f.name).suffix or ".png", f.getvalue()) for f in (bup or [])]
+                    if st.button("このブロックに反映", key=f"bdo_{bid}",
+                                 disabled=not (settings.anthropic_api_key and bitems)):
+                        try:
+                            with st.spinner("解析中…"):
+                                _transcribe_into_block(settings, bitems, char_names, bid)
+                            st.rerun()
+                        except Exception as e:  # noqa: BLE001
+                            st.error(f"文字起こしに失敗: {e}")
+                with hdr[3].popover("🎭", use_container_width=True, help="感情タグを挿入"):
                     for j, (label, tag) in enumerate(TAG_CHOICES):
                         st.button(label, key=f"tag_{bid}_{j}", use_container_width=True,
-                                  on_click=_append_tag_block, args=(bid, tag))
-                if hdr[3].button("🔊", key=f"gen_{bid}", use_container_width=True,
+                                  on_click=_insert_tone_tag, args=(bid, tag))
+                if hdr[4].button("🔊", key=f"gen_{bid}", use_container_width=True,
                                  help="このブロックを生成"):
                     _gen_block(settings, chars, bid)
-                if hdr[4].button("🗑", key=f"del_{bid}", use_container_width=True, help="削除"):
+                if hdr[5].button("🗑", key=f"del_{bid}", use_container_width=True, help="削除"):
                     remove_id = bid
                 # セリフ(全幅)
                 st.text_area("セリフ", key=f"txt_{bid}", height=80,

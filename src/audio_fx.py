@@ -17,13 +17,13 @@ from pathlib import Path
 
 # プリセット = ffmpeg -af に渡すフィルタの並び
 PRESETS: dict[str, list[str]] = {
-    # 放送品質寄りのクリーンな整音(既定)
+    # 明るくクリアな整音(既定)。高域を少し持ち上げてハッキリ。
     "natural": [
         "highpass=f=80",                                  # 低域のゴロ・ノイズ除去
         "acompressor=threshold=-18dB:ratio=3:attack=5:release=120",  # 緩い圧縮で粒を揃える
+        "treble=g=2:f=6000",                              # 高域を少し上げてクリア
         "loudnorm=I=-16:TP=-1.5:LRA=11",                  # ラウドネス正規化(配信目安)
         "alimiter=limit=0.95",                            # クリップ防止
-        "afade=t=in:d=0.02",                              # 頭のプチノイズ回避
     ],
     # 最小限(正規化＋安全策のみ)
     "clean": [
@@ -31,16 +31,15 @@ PRESETS: dict[str, list[str]] = {
         "loudnorm=I=-16:TP=-1.5:LRA=11",
         "alimiter=limit=0.95",
     ],
-    # 温かみ・存在感(低中域を少し持ち上げ、軽い空気感)
+    # 温かみ。低音を厚く・高域を抑えて柔らかく・軽い空気感(natural と明確に差をつける)。
     "warm": [
-        "highpass=f=70",
-        "equalizer=f=200:width_type=o:width=1:g=2",       # 低中域に厚み
-        "equalizer=f=4000:width_type=o:width=1:g=1.5",    # 存在感(プレゼンス)
-        "acompressor=threshold=-18dB:ratio=3:attack=5:release=120",
-        "aecho=0.8:0.85:30:0.12",                         # ごく軽い空気感
+        "highpass=f=60",
+        "bass=g=5:f=180",                                 # 低音に厚み(強め)
+        "treble=g=-4:f=6000",                             # 高域を抑えて柔らかく
+        "acompressor=threshold=-20dB:ratio=2.5:attack=8:release=180",
+        "aecho=0.8:0.88:55:0.2",                          # 軽い空気感(やや増)
         "loudnorm=I=-16:TP=-1.5:LRA=11",
         "alimiter=limit=0.95",
-        "afade=t=in:d=0.02",
     ],
 }
 DEFAULT_PRESET = "natural"

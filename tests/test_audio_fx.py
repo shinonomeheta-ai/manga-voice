@@ -19,9 +19,9 @@ def test_build_filter_clean_is_minimal():
     assert "acompressor" not in f and "aecho" not in f
 
 
-def test_build_filter_warm_has_eq_and_air():
+def test_build_filter_warm_has_warmth_and_air():
     f = build_filter("warm")
-    assert "equalizer" in f and "aecho" in f
+    assert "bass=" in f and "treble=" in f and "aecho" in f
 
 
 def test_unknown_preset_falls_back_to_natural():
