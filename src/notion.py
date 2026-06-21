@@ -113,6 +113,15 @@ def _download(url: str, dest: Path) -> None:
     dest.write_bytes(data)
 
 
+def _download_bytes(url: str) -> tuple[bytes, str]:
+    """URLから画像を取得し (bytes, 拡張子) を返す。"""
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        ct = resp.headers.get("Content-Type", "").split(";")[0].strip()
+        data = resp.read()
+    return data, IMAGE_EXT_BY_CT.get(ct, ".png")
+
+
 def _image_url(block: dict[str, Any]) -> str | None:
     img = block.get("image") or {}
     if img.get("type") == "external":
@@ -120,6 +129,29 @@ def _image_url(block: dict[str, Any]) -> str | None:
     if img.get("type") == "file":
         return (img.get("file") or {}).get("url")
     return None
+
+
+def fetch_page_image_items(token: str, page_ref: str) -> list[tuple[str, bytes]]:
+    """Notionページ内の画像を順に取得し [(拡張子, バイト列)] を返す(ファイル保存しない)。
+
+    Webアプリの画像取り込み(Claude Vision文字起こし)にそのまま渡せる形式。
+    画像URLは約1時間で失効するため、取得時にその場でダウンロードする。
+    """
+    client = NotionClient(token)
+    page_id = extract_page_id(page_ref)
+    items: list[tuple[str, bytes]] = []
+    for block in client.iter_blocks(page_id):
+        if block.get("type") != "image":
+            continue
+        url = _image_url(block)
+        if not url:
+            continue
+        try:
+            data, ext = _download_bytes(url)
+            items.append((ext, data))
+        except Exception as e:  # noqa: BLE001
+            print(f"[notion] 画像DL失敗(失効URLの可能性): {e}")
+    return items
 
 
 def fetch_page_to_inputs(token: str, page_ref: str, inputs_dir: Path) -> list[Path]:

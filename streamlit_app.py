@@ -34,6 +34,7 @@ except Exception:  # noqa: BLE001
     sort_items = None
 
 from src import audio_fx as fx_mod
+from src import notion as notion_mod
 from src import tts as tts_mod
 from src.config import DEFAULT_OUTPUT_FORMAT, CharacterBook, Settings
 
@@ -291,6 +292,27 @@ def main() -> None:
                     st.rerun()
                 except Exception as e:  # noqa: BLE001
                     st.error(f"文字起こしに失敗しました: {e}")
+
+            # --- Notion ページ内の画像から取り込み ---
+            st.divider()
+            st.caption("Notionページ内の画像から取り込み")
+            notion_token = _secret("NOTION_TOKEN")
+            if not notion_token:
+                st.caption("※ Secrets に NOTION_TOKEN を追加すると有効")
+            notion_url = st.text_input("Notion ページ URL / ID", key="notion_url")
+            if st.button("Notionから取り込み→台本に反映", use_container_width=True,
+                         disabled=not (settings.anthropic_api_key and notion_token and notion_url)):
+                try:
+                    with st.spinner("Notionから画像取得→Claude解析…"):
+                        n_items = notion_mod.fetch_page_image_items(notion_token, notion_url)
+                        if not n_items:
+                            st.warning("ページに画像が見つかりませんでした。")
+                        else:
+                            _transcribe_images(settings, n_items, char_names)
+                            st.success(f"{len(n_items)}枚を取り込み→台本に反映しました。")
+                            st.rerun()
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"Notion取り込みに失敗しました: {e}")
 
         with tab_cfg:
             st.selectbox("整音プリセット", list(fx_mod.PRESETS.keys()), index=0,
