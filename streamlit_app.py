@@ -201,158 +201,87 @@ def main() -> None:
     chars = {n: c for n, c in book.characters.items() if c.is_assigned()}
     char_names = list(chars.keys())
 
-    st.title("🎙️ ボイス生成（共有版）")
-    st.caption(f"キャラごとにセリフを足して物語を作れます。モデルは **eleven_v3 固定**。"
-               f"合計最大 {max_chars} 文字。")
-
     if "block_ids" not in st.session_state:
         st.session_state.block_ids = [0]
         st.session_state.block_seq = 1
 
-    # ===== 左サイドバー: 画像から自動で台本化(Claude Vision) =====
+    # ===== 左サイドバー: タブ(取り込み / 設定 / 履歴 / プロジェクト) =====
     with st.sidebar:
-        st.header("🖼 画像から台本化")
-        st.caption("感情付きで文字起こし")
-        if not settings.anthropic_api_key:
-            st.info("Secrets に ANTHROPIC_API_KEY（Claude）を追加すると使えます。")
+        tab_in, tab_cfg, tab_hist, tab_proj = st.tabs(
+            ["📥 取り込み", "⚙️ 設定", "🕘 履歴", "💾 プロジェクト"])
 
-        # クリップボードから貼り付け(コピーした画像をそのまま)
-        if paste_image_button is not None:
-            res = paste_image_button("📋 画像を貼り付け", key="paste_btn")
-            if getattr(res, "image_data", None) is not None:
-                buf = io.BytesIO()
-                res.image_data.save(buf, format="PNG")
-                st.session_state["pasted_img"] = buf.getvalue()
-        else:
-            st.caption("※ 貼り付けボタン未導入（streamlit-paste-button）")
+        with tab_in:
+            st.caption("画像から感情付きで文字起こし")
+            if not settings.anthropic_api_key:
+                st.info("Secrets に ANTHROPIC_API_KEY（Claude）を追加すると使えます。")
+            if paste_image_button is not None:
+                res = paste_image_button("📋 画像を貼り付け", key="paste_btn")
+                if getattr(res, "image_data", None) is not None:
+                    buf = io.BytesIO()
+                    res.image_data.save(buf, format="PNG")
+                    st.session_state["pasted_img"] = buf.getvalue()
+            else:
+                st.caption("※ 貼り付け未導入（streamlit-paste-button）")
+            if st.session_state.get("pasted_img"):
+                st.image(st.session_state["pasted_img"], use_container_width=True, caption="貼り付け画像")
+                if st.button("貼り付けを取り消し", key="clear_paste", use_container_width=True):
+                    st.session_state.pop("pasted_img", None)
+                    st.rerun()
+            ups = st.file_uploader("またはD&D／ファイル選択（複数可）",
+                                   type=["png", "jpg", "jpeg", "webp"],
+                                   accept_multiple_files=True, key="tr_imgs")
+            items: list[tuple[str, bytes]] = []
+            for f in ups or []:
+                items.append((Path(f.name).suffix or ".png", f.getvalue()))
+            if st.session_state.get("pasted_img"):
+                items.append((".png", st.session_state["pasted_img"]))
+            if st.button("文字起こし→台本に反映", use_container_width=True,
+                         disabled=not (settings.anthropic_api_key and items)):
+                try:
+                    with st.spinner("解析中…（Claudeが画像を読み取り）"):
+                        _transcribe_images(settings, items, char_names)
+                    st.session_state.pop("pasted_img", None)
+                    st.success("台本に反映しました。")
+                    st.rerun()
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"文字起こしに失敗しました: {e}")
 
-        if st.session_state.get("pasted_img"):
-            st.image(st.session_state["pasted_img"], use_container_width=True, caption="貼り付け画像")
-            if st.button("貼り付けを取り消し", key="clear_paste", use_container_width=True):
-                st.session_state.pop("pasted_img", None)
-                st.rerun()
+        with tab_cfg:
+            st.selectbox("整音プリセット", list(fx_mod.PRESETS.keys()), index=0,
+                         format_func=lambda k: PRESET_LABELS.get(k, k), key="preset")
+            st.checkbox("整音エフェクトをかける", value=True, key="do_fx")
+            st.caption("モデル: eleven_v3 固定")
 
-        ups = st.file_uploader("またはD&D／ファイル選択（複数可）",
-                               type=["png", "jpg", "jpeg", "webp"],
-                               accept_multiple_files=True, key="tr_imgs")
+        with tab_hist:
+            hist = st.session_state.get("history", [])
+            if not hist:
+                st.caption("まだありません（生成すると追加）")
+            else:
+                if st.button("履歴をクリア", use_container_width=True, key="hist_clear"):
+                    st.session_state["history"] = []
+                    st.rerun()
+                for h in reversed(hist):
+                    st.caption(h["label"])
+                    st.audio(h["audio"], format="audio/mp3")
 
-        items: list[tuple[str, bytes]] = []
-        for f in ups or []:
-            items.append((Path(f.name).suffix or ".png", f.getvalue()))
-        if st.session_state.get("pasted_img"):
-            items.append((".png", st.session_state["pasted_img"]))
+        with tab_proj:
+            proj = {"version": 1,
+                    "blocks": [{"speaker": s, "text": t} for s, t in _project_pairs()]}
+            st.download_button("⬇️ 保存（JSON）", json.dumps(proj, ensure_ascii=False, indent=2),
+                               file_name="project.json", mime="application/json",
+                               use_container_width=True, key="proj_dl")
+            upj = st.file_uploader("📂 読み込み（JSON）", type=["json"], key="proj_up")
+            if upj is not None and st.button("読み込む", use_container_width=True, key="proj_load"):
+                try:
+                    data = json.loads(upj.getvalue().decode("utf-8"))
+                    _set_blocks([(b.get("speaker", ""), b.get("text", ""))
+                                 for b in data.get("blocks", [])])
+                    st.success("読み込みました。")
+                    st.rerun()
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"読み込み失敗: {e}")
 
-        if st.button("文字起こし→台本に反映", use_container_width=True,
-                     disabled=not (settings.anthropic_api_key and items)):
-            try:
-                with st.spinner("解析中…（Claudeが画像を読み取り）"):
-                    _transcribe_images(settings, items, char_names)
-                st.session_state.pop("pasted_img", None)
-                st.success("台本に反映しました。")
-                st.rerun()
-            except Exception as e:  # noqa: BLE001
-                st.error(f"文字起こしに失敗しました: {e}")
-
-        # --- プロジェクト管理(JSONで保存/読込: クラウドでも消えない) ---
-        st.divider()
-        st.header("💾 プロジェクト")
-        proj = {"version": 1,
-                "blocks": [{"speaker": s, "text": t} for s, t in _project_pairs()]}
-        st.download_button("⬇️ 保存（JSON）", json.dumps(proj, ensure_ascii=False, indent=2),
-                           file_name="project.json", mime="application/json",
-                           use_container_width=True, key="proj_dl")
-        upj = st.file_uploader("📂 読み込み（JSON）", type=["json"], key="proj_up")
-        if upj is not None and st.button("読み込む", use_container_width=True, key="proj_load"):
-            try:
-                data = json.loads(upj.getvalue().decode("utf-8"))
-                _set_blocks([(b.get("speaker", ""), b.get("text", ""))
-                             for b in data.get("blocks", [])])
-                st.success("読み込みました。")
-                st.rerun()
-            except Exception as e:  # noqa: BLE001
-                st.error(f"読み込み失敗: {e}")
-
-        # --- 生成履歴(セッション内・リロードまで保持) ---
-        st.divider()
-        st.header("🕘 生成履歴")
-        hist = st.session_state.get("history", [])
-        if not hist:
-            st.caption("まだありません（生成すると追加）")
-        else:
-            if st.button("履歴をクリア", use_container_width=True, key="hist_clear"):
-                st.session_state["history"] = []
-                st.rerun()
-            for idx, h in enumerate(reversed(hist)):
-                st.caption(h["label"])
-                st.audio(h["audio"], format="audio/mp3")
-
-    left, right = st.columns([4, 1])
-
-    # ===== 左: セリフ（キャラごとのブロック）=====
-    remove_id = None
-    with left:
-        st.caption("台本（番号順に読み上げ）")
-        for i, bid in enumerate(st.session_state.block_ids):
-            with st.container(border=True):
-                # 上段: 番号 + 話者 + アイコン操作(画像/感情タグ/生成/削除)
-                hdr = st.columns([1, 5, 1, 1, 1, 1])
-                hdr[0].markdown(f"### {i + 1}")
-                if char_names:
-                    hdr[1].selectbox("キャラ", char_names, key=f"spk_{bid}",
-                                     label_visibility="collapsed")
-                else:
-                    hdr[1].text_input("voice_id", key=f"spk_{bid}",
-                                      label_visibility="collapsed")
-                with hdr[2].popover("🖼", use_container_width=True, help="画像から文字起こしして差し込む"):
-                    bup = st.file_uploader("画像をドロップ", type=["png", "jpg", "jpeg", "webp"],
-                                           accept_multiple_files=True, key=f"bimg_{bid}")
-                    bitems = [(Path(f.name).suffix or ".png", f.getvalue()) for f in (bup or [])]
-                    if st.button("このブロックに反映", key=f"bdo_{bid}",
-                                 disabled=not (settings.anthropic_api_key and bitems)):
-                        try:
-                            with st.spinner("解析中…"):
-                                _transcribe_into_block(settings, bitems, char_names, bid)
-                            st.rerun()
-                        except Exception as e:  # noqa: BLE001
-                            st.error(f"文字起こしに失敗: {e}")
-                with hdr[3].popover("🎭", use_container_width=True, help="感情タグを挿入"):
-                    for j, (label, tag) in enumerate(TAG_CHOICES):
-                        st.button(label, key=f"tag_{bid}_{j}", use_container_width=True,
-                                  on_click=_insert_tone_tag, args=(bid, tag))
-                if hdr[4].button("🔊", key=f"gen_{bid}", use_container_width=True,
-                                 help="このブロックを生成"):
-                    _gen_block(settings, chars, bid)
-                if hdr[5].button("🗑", key=f"del_{bid}", use_container_width=True, help="削除"):
-                    remove_id = bid
-                # セリフ(全幅)
-                st.text_area("セリフ", key=f"txt_{bid}", height=80,
-                             label_visibility="collapsed", placeholder="セリフ…")
-                # 生成済み音声: ナチュラル / ウォーム を聴き比べ
-                an = st.session_state.get(f"audioN_{bid}")
-                aw = st.session_state.get(f"audioW_{bid}")
-                if an or aw:
-                    st.caption("🎧 聴き比べ")
-                    cmp = st.columns(2)
-                    if an:
-                        cmp[0].caption("ナチュラル")
-                        cmp[0].audio(an, format="audio/mp3")
-                        cmp[0].download_button("⬇️ ナチュラル", an, key=f"dlN_{bid}",
-                                               file_name=f"block_{bid}_natural.mp3", mime="audio/mp3")
-                    if aw:
-                        cmp[1].caption("ウォーム")
-                        cmp[1].audio(aw, format="audio/mp3")
-                        cmp[1].download_button("⬇️ ウォーム", aw, key=f"dlW_{bid}",
-                                               file_name=f"block_{bid}_warm.mp3", mime="audio/mp3")
-        if st.button("＋ ブロックを追加", use_container_width=True):
-            st.session_state.block_ids.append(st.session_state.block_seq)
-            st.session_state.block_seq += 1
-            st.rerun()
-
-    if remove_id is not None and len(st.session_state.block_ids) > 1:
-        st.session_state.block_ids = [b for b in st.session_state.block_ids if b != remove_id]
-        st.rerun()
-
-    # 全ブロックを収集
+    # ===== 全ブロックを収集(出力バー用) =====
     lines: list[dict[str, str]] = []
     stabs: list[str] = []
     total = 0
@@ -368,35 +297,99 @@ def main() -> None:
         stabs.append(chars[spk].stability if spk in chars else "natural")
         total += len(txt)
 
-    # ===== 右: 設定 ＋ まとめて生成 =====
-    with right:
-        st.subheader("設定")
-        preset = st.selectbox("整音プリセット", list(fx_mod.PRESETS.keys()), index=0,
-                              format_func=lambda k: PRESET_LABELS.get(k, k), key="preset")
-        do_fx = st.checkbox("整音エフェクトをかける", value=True, key="do_fx")
-        st.caption(f"合計 {total} / {max_chars} 文字")
-        over = total > max_chars
-        if over:
-            st.warning("文字数が上限を超えています。減らしてください。")
-        if st.button("🔊 全部つなげて生成", type="primary", disabled=not lines or over,
-                     use_container_width=True):
-            try:
-                with st.spinner("生成中…（数秒）"):
-                    if len(lines) == 1:
-                        audio = tts_mod.synthesize_one(
-                            settings, lines[0]["text"], lines[0]["voice_id"],
-                            stabs[0], None, DEFAULT_OUTPUT_FORMAT)
-                    else:
-                        audio = tts_mod.synthesize_dialogue_bytes(settings, lines, DEFAULT_OUTPUT_FORMAT)
-                    st.session_state["audio_all"] = _postprocess(audio, preset) if do_fx else audio
-                    _add_history(f"掛け合い {len(lines)}行", st.session_state["audio_all"])
-            except Exception as e:  # noqa: BLE001
-                st.session_state.pop("audio_all", None)
-                st.error(f"生成に失敗しました: {e}")
-        if st.session_state.get("audio_all"):
-            st.audio(st.session_state["audio_all"], format="audio/mp3")
-            st.download_button("⬇️ まとめてDL", st.session_state["audio_all"],
-                               file_name="story.mp3", mime="audio/mp3", key="dl_all")
+    # ===== メイン: 出力バー + 台本(全幅) =====
+    st.title("🎙️ ボイス生成（共有版）")
+    over = total > max_chars
+    ob1, ob2 = st.columns([3, 1])
+    ob1.caption(f"合計 {total} / {max_chars} 文字 ・ eleven_v3 ・ 設定はサイドバー")
+    if ob2.button("🔊 全部つなげて生成", type="primary",
+                  disabled=not lines or over, use_container_width=True):
+        try:
+            with st.spinner("生成中…（数秒）"):
+                if len(lines) == 1:
+                    audio = tts_mod.synthesize_one(
+                        settings, lines[0]["text"], lines[0]["voice_id"],
+                        stabs[0], None, DEFAULT_OUTPUT_FORMAT)
+                else:
+                    audio = tts_mod.synthesize_dialogue_bytes(settings, lines, DEFAULT_OUTPUT_FORMAT)
+                preset = st.session_state.get("preset", "natural")
+                do_fx = st.session_state.get("do_fx", True)
+                st.session_state["audio_all"] = _postprocess(audio, preset) if do_fx else audio
+                _add_history(f"掛け合い {len(lines)}行", st.session_state["audio_all"])
+        except Exception as e:  # noqa: BLE001
+            st.session_state.pop("audio_all", None)
+            st.error(f"生成に失敗しました: {e}")
+    if over:
+        st.warning("文字数が上限を超えています。減らしてください。")
+    if st.session_state.get("audio_all"):
+        st.audio(st.session_state["audio_all"], format="audio/mp3")
+        st.download_button("⬇️ まとめてDL", st.session_state["audio_all"],
+                           file_name="story.mp3", mime="audio/mp3", key="dl_all")
+
+    st.divider()
+    st.caption("台本（番号順に読み上げ）")
+
+    remove_id = None
+    for i, bid in enumerate(st.session_state.block_ids):
+        with st.container(border=True):
+            # 上段: 番号 + 話者 + アイコン操作(画像/感情タグ/生成/削除)
+            hdr = st.columns([1, 5, 1, 1, 1, 1])
+            hdr[0].markdown(f"### {i + 1}")
+            if char_names:
+                hdr[1].selectbox("キャラ", char_names, key=f"spk_{bid}",
+                                 label_visibility="collapsed")
+            else:
+                hdr[1].text_input("voice_id", key=f"spk_{bid}",
+                                  label_visibility="collapsed")
+            with hdr[2].popover("🖼", use_container_width=True, help="画像から文字起こしして差し込む"):
+                bup = st.file_uploader("画像をドロップ", type=["png", "jpg", "jpeg", "webp"],
+                                       accept_multiple_files=True, key=f"bimg_{bid}")
+                bitems = [(Path(f.name).suffix or ".png", f.getvalue()) for f in (bup or [])]
+                if st.button("このブロックに反映", key=f"bdo_{bid}",
+                             disabled=not (settings.anthropic_api_key and bitems)):
+                    try:
+                        with st.spinner("解析中…"):
+                            _transcribe_into_block(settings, bitems, char_names, bid)
+                        st.rerun()
+                    except Exception as e:  # noqa: BLE001
+                        st.error(f"文字起こしに失敗: {e}")
+            with hdr[3].popover("🎭", use_container_width=True, help="感情タグを挿入"):
+                for j, (label, tag) in enumerate(TAG_CHOICES):
+                    st.button(label, key=f"tag_{bid}_{j}", use_container_width=True,
+                              on_click=_insert_tone_tag, args=(bid, tag))
+            if hdr[4].button("🔊", key=f"gen_{bid}", use_container_width=True,
+                             help="このブロックを生成"):
+                _gen_block(settings, chars, bid)
+            if hdr[5].button("🗑", key=f"del_{bid}", use_container_width=True, help="削除"):
+                remove_id = bid
+            # セリフ(全幅)
+            st.text_area("セリフ", key=f"txt_{bid}", height=80,
+                         label_visibility="collapsed", placeholder="セリフ…")
+            # 生成済み音声: ナチュラル / ウォーム を聴き比べ
+            an = st.session_state.get(f"audioN_{bid}")
+            aw = st.session_state.get(f"audioW_{bid}")
+            if an or aw:
+                st.caption("🎧 聴き比べ")
+                cmp = st.columns(2)
+                if an:
+                    cmp[0].caption("ナチュラル")
+                    cmp[0].audio(an, format="audio/mp3")
+                    cmp[0].download_button("⬇️ ナチュラル", an, key=f"dlN_{bid}",
+                                           file_name=f"block_{bid}_natural.mp3", mime="audio/mp3")
+                if aw:
+                    cmp[1].caption("ウォーム")
+                    cmp[1].audio(aw, format="audio/mp3")
+                    cmp[1].download_button("⬇️ ウォーム", aw, key=f"dlW_{bid}",
+                                           file_name=f"block_{bid}_warm.mp3", mime="audio/mp3")
+
+    if st.button("＋ ブロックを追加", use_container_width=True):
+        st.session_state.block_ids.append(st.session_state.block_seq)
+        st.session_state.block_seq += 1
+        st.rerun()
+
+    if remove_id is not None and len(st.session_state.block_ids) > 1:
+        st.session_state.block_ids = [b for b in st.session_state.block_ids if b != remove_id]
+        st.rerun()
 
 
 main()
