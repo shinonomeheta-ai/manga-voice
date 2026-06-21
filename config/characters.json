@@ -51,6 +51,24 @@
       "stability": "natural",
       "seed": 3004
     },
+    "あかり": {
+      "voice_id": "ugYcuAusTuWCSOpJD0Xd",
+      "voice_name": "",
+      "description": "物語の起点・コメディ担当。元気で思い込みが激しい",
+      "gender": "female",
+      "age": "young_adult",
+      "stability": "creative",
+      "seed": 3005
+    },
+    "ななし": {
+      "voice_id": "NrGpiA92Gz9B93xLbfzg",
+      "voice_name": "",
+      "description": "主人公・聞き手・ツッコミ役。落ち着いた常識人",
+      "gender": "female",
+      "age": "young_adult",
+      "stability": "natural",
+      "seed": 3006
+    },
     "博士": {
       "voice_id": "",
       "voice_name": "",
