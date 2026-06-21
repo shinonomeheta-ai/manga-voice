@@ -132,30 +132,42 @@ def main() -> None:
     # ===== 左: セリフ（キャラごとのブロック）=====
     remove_id = None
     with left:
-        st.subheader("セリフ")
+        st.caption("台本（番号順に読み上げ）")
         for i, bid in enumerate(st.session_state.block_ids):
             with st.container(border=True):
-                pick, acts = st.columns([3, 2])
-                # 左: キャラ + セリフ
+                # 上段: 番号 + 話者 + アイコン操作(感情タグ/生成/削除)
+                hdr = st.columns([1, 5, 1, 1, 1])
+                hdr[0].markdown(f"### {i + 1}")
                 if char_names:
-                    pick.selectbox(f"キャラ（ブロック{i + 1}）", char_names, key=f"spk_{bid}")
+                    hdr[1].selectbox("キャラ", char_names, key=f"spk_{bid}",
+                                     label_visibility="collapsed")
                 else:
-                    pick.text_input(f"voice_id（ブロック{i + 1}）", key=f"spk_{bid}")
-                pick.text_area("セリフ", key=f"txt_{bid}", height=80,
-                               placeholder="例: いやー、マジで助かったよ…")
-                # 右: 感情タグ / このブロックを生成 / 削除
-                with acts.popover("＋ 感情タグ", use_container_width=True):
+                    hdr[1].text_input("voice_id", key=f"spk_{bid}",
+                                      label_visibility="collapsed")
+                with hdr[2].popover("🎭", use_container_width=True, help="感情タグを挿入"):
                     for j, (label, tag) in enumerate(TAG_CHOICES):
                         st.button(label, key=f"tag_{bid}_{j}", use_container_width=True,
                                   on_click=_append_tag_block, args=(bid, tag))
-                if acts.button("🔊 このブロックを生成", key=f"gen_{bid}", use_container_width=True):
+                if hdr[3].button("🔊", key=f"gen_{bid}", use_container_width=True,
+                                 help="このブロックを生成"):
                     _gen_block(settings, chars, bid)
-                if acts.button("🗑 削除", key=f"del_{bid}", use_container_width=True):
+                if hdr[4].button("🗑", key=f"del_{bid}", use_container_width=True, help="削除"):
                     remove_id = bid
-                # 生成済み音声はブロック全幅で表示
+                # 下段: 漫画サムネ + セリフ
+                thumb, body = st.columns([1, 5])
+                if st.session_state.get(f"img_{bid}"):
+                    thumb.image(st.session_state[f"img_{bid}"], use_container_width=True)
+                with thumb.popover("🖼", use_container_width=True, help="漫画サムネを紐付け"):
+                    up = st.file_uploader("画像", type=["png", "jpg", "jpeg", "webp"],
+                                          key=f"up_{bid}", label_visibility="collapsed")
+                    if up is not None:
+                        st.session_state[f"img_{bid}"] = up.getvalue()
+                body.text_area("セリフ", key=f"txt_{bid}", height=80,
+                               label_visibility="collapsed", placeholder="セリフ…")
+                # 生成済み音声
                 if st.session_state.get(f"audio_{bid}"):
                     st.audio(st.session_state[f"audio_{bid}"], format="audio/mp3")
-                    st.download_button("⬇️ このブロックをDL", st.session_state[f"audio_{bid}"],
+                    st.download_button("⬇️ DL", st.session_state[f"audio_{bid}"],
                                        file_name=f"block_{bid}.mp3", mime="audio/mp3", key=f"dl_{bid}")
         if st.button("＋ ブロックを追加", use_container_width=True):
             st.session_state.block_ids.append(st.session_state.block_seq)
