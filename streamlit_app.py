@@ -14,11 +14,17 @@ packages.txt の ffmpeg で有効化される。
 """
 from __future__ import annotations
 
+import io
 import os
 import tempfile
 from pathlib import Path
 
 import streamlit as st
+
+try:  # クリップボード貼り付けボタン(未導入環境でも動くよう任意依存)
+    from streamlit_paste_button import paste_image_button
+except Exception:  # noqa: BLE001
+    paste_image_button = None
 
 from src import audio_fx as fx_mod
 from src import tts as tts_mod
@@ -93,20 +99,20 @@ def _gen_block(settings: Settings, chars: dict, bid: int) -> None:
     if not txt or not vid:
         st.warning("セリフとキャラ（ボイス）を入れてください。")
         return
-    preset = st.session_state.get("preset", "natural")
-    do_fx = st.session_state.get("do_fx", True)
     stab = chars[spk].stability if spk in chars else "natural"
     try:
-        with st.spinner("生成中…"):
-            a = tts_mod.synthesize_one(settings, txt, vid, stab, None, DEFAULT_OUTPUT_FORMAT)
-            st.session_state[f"audio_{bid}"] = _postprocess(a, preset) if do_fx else a
+        with st.spinner("生成中…（聴き比べ用に2版）"):
+            # TTSは1回。整音だけ natural / warm の2版を作って聴き比べ
+            raw = tts_mod.synthesize_one(settings, txt, vid, stab, None, DEFAULT_OUTPUT_FORMAT)
+            st.session_state[f"audioN_{bid}"] = _postprocess(raw, "natural")
+            st.session_state[f"audioW_{bid}"] = _postprocess(raw, "warm")
     except Exception as e:  # noqa: BLE001
         st.error(f"生成に失敗しました: {e}")
 
 
 def _script_to_blocks(script, char_names: list[str]) -> None:
     """解析結果(Script)を、編集可能なブロック(session_state)へ展開する。"""
-    for k in [k for k in list(st.session_state.keys()) if str(k).startswith("audio_")]:
+    for k in [k for k in list(st.session_state.keys()) if str(k).startswith("audio")]:
         del st.session_state[k]  # 旧ブロックの生成音声をクリア
     seq = 0
     st.session_state.block_ids = []
@@ -124,17 +130,16 @@ def _script_to_blocks(script, char_names: list[str]) -> None:
     st.session_state.block_seq = max(seq, 1)
 
 
-def _transcribe_images(settings: Settings, files, char_names: list[str]) -> None:
-    """ドラッグ&ドロップした漫画画像を Claude Vision で解析し、感情付き台本に変換。"""
-    import tempfile
+def _transcribe_images(settings: Settings, items: list[tuple[str, bytes]],
+                       char_names: list[str]) -> None:
+    """漫画画像(拡張子, バイト列)を Claude Vision で解析し、感情付き台本に変換。"""
     from src import assets as assets_mod
     from src.analyze import analyze as analyze_inputs
     from src.config import ASSETS_DIR, CharacterBook
 
     with tempfile.TemporaryDirectory() as d:
-        for k, f in enumerate(files):
-            ext = (Path(f.name).suffix or ".png").lower()
-            (Path(d) / f"page_{k:03d}{ext}").write_bytes(f.getvalue())
+        for k, (ext, data) in enumerate(items):
+            (Path(d) / f"page_{k:03d}{(ext or '.png').lower()}").write_bytes(data)
         book = CharacterBook.load()
         bible = assets_mod.load_character_bible(ASSETS_DIR, book)
         script = analyze_inputs(settings, Path(d), language=book.language,
@@ -172,16 +177,42 @@ def main() -> None:
     remove_id = None
     with left:
         # 画像から感情付きで自動台本化(Claude Vision)
-        with st.expander("🖼 画像から自動で台本化（感情付き文字起こし）"):
+        with st.expander("🖼 画像から自動で台本化（感情付き文字起こし）", expanded=True):
             if not settings.anthropic_api_key:
                 st.info("この機能は Secrets に ANTHROPIC_API_KEY（Claude）を追加すると使えます。")
-            ups = st.file_uploader("漫画画像をドラッグ&ドロップ（複数可）",
+
+            # クリップボードから貼り付け(コピーした画像をそのまま)
+            if paste_image_button is not None:
+                res = paste_image_button("📋 画像を貼り付け（コピーした画像）", key="paste_btn")
+                if getattr(res, "image_data", None) is not None:
+                    buf = io.BytesIO()
+                    res.image_data.save(buf, format="PNG")
+                    st.session_state["pasted_img"] = buf.getvalue()
+            else:
+                st.caption("※ 貼り付けボタンは未導入（requirementsに streamlit-paste-button）。")
+
+            if st.session_state.get("pasted_img"):
+                st.image(st.session_state["pasted_img"], width=180, caption="貼り付け画像")
+                if st.button("貼り付けを取り消し", key="clear_paste"):
+                    st.session_state.pop("pasted_img", None)
+                    st.rerun()
+
+            ups = st.file_uploader("またはドラッグ&ドロップ／ファイル選択（複数可）",
                                    type=["png", "jpg", "jpeg", "webp"],
                                    accept_multiple_files=True, key="tr_imgs")
-            if st.button("文字起こし→台本に反映", disabled=not (settings.anthropic_api_key and ups)):
+
+            items: list[tuple[str, bytes]] = []
+            for f in ups or []:
+                items.append((Path(f.name).suffix or ".png", f.getvalue()))
+            if st.session_state.get("pasted_img"):
+                items.append((".png", st.session_state["pasted_img"]))
+
+            if st.button("文字起こし→台本に反映",
+                         disabled=not (settings.anthropic_api_key and items)):
                 try:
                     with st.spinner("解析中…（Claudeが画像を読み取り）"):
-                        _transcribe_images(settings, ups, char_names)
+                        _transcribe_images(settings, items, char_names)
+                    st.session_state.pop("pasted_img", None)
                     st.success("台本に反映しました。下のブロックを確認・編集してください。")
                     st.rerun()
                 except Exception as e:  # noqa: BLE001
@@ -211,11 +242,22 @@ def main() -> None:
                 # セリフ(全幅)
                 st.text_area("セリフ", key=f"txt_{bid}", height=80,
                              label_visibility="collapsed", placeholder="セリフ…")
-                # 生成済み音声
-                if st.session_state.get(f"audio_{bid}"):
-                    st.audio(st.session_state[f"audio_{bid}"], format="audio/mp3")
-                    st.download_button("⬇️ DL", st.session_state[f"audio_{bid}"],
-                                       file_name=f"block_{bid}.mp3", mime="audio/mp3", key=f"dl_{bid}")
+                # 生成済み音声: ナチュラル / ウォーム を聴き比べ
+                an = st.session_state.get(f"audioN_{bid}")
+                aw = st.session_state.get(f"audioW_{bid}")
+                if an or aw:
+                    st.caption("🎧 聴き比べ")
+                    cmp = st.columns(2)
+                    if an:
+                        cmp[0].caption("ナチュラル")
+                        cmp[0].audio(an, format="audio/mp3")
+                        cmp[0].download_button("⬇️ ナチュラル", an, key=f"dlN_{bid}",
+                                               file_name=f"block_{bid}_natural.mp3", mime="audio/mp3")
+                    if aw:
+                        cmp[1].caption("ウォーム")
+                        cmp[1].audio(aw, format="audio/mp3")
+                        cmp[1].download_button("⬇️ ウォーム", aw, key=f"dlW_{bid}",
+                                               file_name=f"block_{bid}_warm.mp3", mime="audio/mp3")
         if st.button("＋ ブロックを追加", use_container_width=True):
             st.session_state.block_ids.append(st.session_state.block_seq)
             st.session_state.block_seq += 1
