@@ -24,7 +24,7 @@ from src import audio_fx as fx_mod
 from src import tts as tts_mod
 from src.config import DEFAULT_OUTPUT_FORMAT, CharacterBook, Settings
 
-st.set_page_config(page_title="ボイス生成（共有版）", page_icon="🎙️")
+st.set_page_config(page_title="ボイス生成（共有版）", page_icon="🎙️", layout="wide")
 
 # ワンクリック挿入できる感情/演出タグ。(日本語ラベル, 実際に挿入するv3タグ)。
 # v3 は英語タグのみ解釈するため、ボタンは日本語表示・挿入は英語タグのままにする。
@@ -127,7 +127,7 @@ def main() -> None:
         st.session_state.block_ids = [0]
         st.session_state.block_seq = 1
 
-    left, right = st.columns([3, 1])
+    left, right = st.columns([4, 1])
 
     # ===== 左: セリフ（キャラごとのブロック）=====
     remove_id = None
