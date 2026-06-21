@@ -148,16 +148,26 @@ def _gen_block(settings: Settings, chars: dict, bid: int) -> None:
         return
     stab = chars[spk].stability if spk in chars else "natural"
     gen_txt = _effective_text(spk, txt)
+    prog = st.progress(0, text="生成の準備中…")
+    stage = "準備"
     try:
-        with st.spinner("生成中…（聴き比べ用に2版）"):
-            # TTSは1回。整音だけ natural / warm の2版を作って聴き比べ
-            raw = tts_mod.synthesize_one(settings, gen_txt, vid, stab, None, DEFAULT_OUTPUT_FORMAT)
-            st.session_state[f"raw_{bid}"] = raw  # 再適用用に素の声を保持
-            st.session_state[f"audioN_{bid}"] = _postprocess(raw, "natural")
-            st.session_state[f"audioW_{bid}"] = _postprocess(raw, "warm")
-            _add_history(f"{spk}「{txt[:16]}」", st.session_state[f"audioN_{bid}"])
+        # TTSは1回。整音だけ natural / warm の2版を作って聴き比べ
+        stage = "音声生成（ElevenLabs）"
+        prog.progress(25, text=f"🎙️ {stage}…")
+        raw = tts_mod.synthesize_one(settings, gen_txt, vid, stab, None, DEFAULT_OUTPUT_FORMAT)
+        st.session_state[f"raw_{bid}"] = raw  # 再適用用に素の声を保持
+        stage = "整音（ナチュラル）"
+        prog.progress(60, text=f"🎚️ {stage}…")
+        st.session_state[f"audioN_{bid}"] = _postprocess(raw, "natural")
+        stage = "整音（ウォーム）"
+        prog.progress(85, text=f"🎚️ {stage}…")
+        st.session_state[f"audioW_{bid}"] = _postprocess(raw, "warm")
+        _add_history(f"{spk}「{txt[:16]}」", st.session_state[f"audioN_{bid}"])
+        prog.progress(100, text="✅ 完了")
     except Exception as e:  # noqa: BLE001
-        st.error(f"生成に失敗しました: {e}")
+        st.error(f"生成に失敗しました（{stage}）: {e}")
+    finally:
+        prog.empty()
 
 
 def _analyze_images(settings: Settings, items: list[tuple[str, bytes]]):
@@ -297,14 +307,18 @@ def main() -> None:
                 items.append((".png", st.session_state["pasted_img"]))
             if st.button("文字起こし→台本に反映", use_container_width=True,
                          disabled=not (settings.anthropic_api_key and items)):
+                prog = st.progress(0, text="準備中…")
                 try:
-                    with st.spinner("解析中…（Claudeが画像を読み取り）"):
-                        _transcribe_images(settings, items, char_names)
+                    prog.progress(40, text=f"🧠 Claude解析…（画像{len(items)}枚 / Haiku）")
+                    _transcribe_images(settings, items, char_names)
+                    prog.progress(100, text="✅ 完了")
                     st.session_state.pop("pasted_img", None)
                     st.success("台本に反映しました。")
                     st.rerun()
                 except Exception as e:  # noqa: BLE001
-                    st.error(f"文字起こしに失敗しました: {e}")
+                    st.error(f"文字起こしに失敗しました（Claude解析）: {e}")
+                finally:
+                    prog.empty()
 
             # --- Notion ページ内の画像から取り込み ---
             st.divider()
@@ -315,17 +329,26 @@ def main() -> None:
             notion_url = st.text_input("Notion ページ URL / ID", key="notion_url")
             if st.button("Notionから取り込み→台本に反映", use_container_width=True,
                          disabled=not (settings.anthropic_api_key and notion_token and notion_url)):
+                prog = st.progress(0, text="準備中…")
+                stage = "Notion取得"
                 try:
-                    with st.spinner("Notionから画像取得→Claude解析…"):
-                        n_items = notion_mod.fetch_page_image_items(notion_token, notion_url)
-                        if not n_items:
-                            st.warning("ページに画像が見つかりませんでした。")
-                        else:
-                            _transcribe_images(settings, n_items, char_names)
-                            st.success(f"{len(n_items)}枚を取り込み→台本に反映しました。")
-                            st.rerun()
+                    prog.progress(30, text="📥 Notionから画像を取得中…")
+                    n_items = notion_mod.fetch_page_image_items(notion_token, notion_url)
+                    if not n_items:
+                        prog.empty()
+                        st.warning("ページに画像が見つかりませんでした"
+                                   "（画像ブロックが無い／DB・子ページの画像は対象外／ページ未共有の可能性）。")
+                    else:
+                        stage = "Claude解析"
+                        prog.progress(65, text=f"🧠 Claude解析…（画像{len(n_items)}枚 / Haiku）")
+                        _transcribe_images(settings, n_items, char_names)
+                        prog.progress(100, text="✅ 完了")
+                        st.success(f"{len(n_items)}枚を取り込み→台本に反映しました。")
+                        st.rerun()
                 except Exception as e:  # noqa: BLE001
-                    st.error(f"Notion取り込みに失敗しました: {e}")
+                    st.error(f"Notion取り込みに失敗しました（{stage}）: {e}")
+                finally:
+                    prog.empty()
 
         with tab_cfg:
             st.selectbox("整音プリセット", list(fx_mod.PRESETS.keys()), index=0,
@@ -401,22 +424,30 @@ def main() -> None:
     over = total > max_chars
     if st.button("🔊 全部つなげて生成", type="primary",
                  disabled=not lines or over, use_container_width=True):
+        prog = st.progress(0, text="生成の準備中…")
+        stage = "準備"
         try:
-            with st.spinner("生成中…（数秒）"):
-                if len(lines) == 1:
-                    audio = tts_mod.synthesize_one(
-                        settings, lines[0]["text"], lines[0]["voice_id"],
-                        stabs[0], None, DEFAULT_OUTPUT_FORMAT)
-                else:
-                    audio = tts_mod.synthesize_dialogue_bytes(settings, lines, DEFAULT_OUTPUT_FORMAT)
-                st.session_state["raw_all"] = audio  # 再適用用に素の声を保持
-                preset = st.session_state.get("preset", "natural")
-                do_fx = st.session_state.get("do_fx", True)
-                st.session_state["audio_all"] = _postprocess(audio, preset if do_fx else None)
-                _add_history(f"掛け合い {len(lines)}行", st.session_state["audio_all"])
+            stage = "音声生成（ElevenLabs）"
+            prog.progress(30, text=f"🎙️ {stage}…（{len(lines)}行）")
+            if len(lines) == 1:
+                audio = tts_mod.synthesize_one(
+                    settings, lines[0]["text"], lines[0]["voice_id"],
+                    stabs[0], None, DEFAULT_OUTPUT_FORMAT)
+            else:
+                audio = tts_mod.synthesize_dialogue_bytes(settings, lines, DEFAULT_OUTPUT_FORMAT)
+            st.session_state["raw_all"] = audio  # 再適用用に素の声を保持
+            stage = "整音"
+            prog.progress(75, text=f"🎚️ {stage}…")
+            preset = st.session_state.get("preset", "natural")
+            do_fx = st.session_state.get("do_fx", True)
+            st.session_state["audio_all"] = _postprocess(audio, preset if do_fx else None)
+            _add_history(f"掛け合い {len(lines)}行", st.session_state["audio_all"])
+            prog.progress(100, text="✅ 完了")
         except Exception as e:  # noqa: BLE001
             st.session_state.pop("audio_all", None)
-            st.error(f"生成に失敗しました: {e}")
+            st.error(f"生成に失敗しました（{stage}）: {e}")
+        finally:
+            prog.empty()
     if over:
         st.warning("文字数が上限を超えています。減らしてください。")
     if st.session_state.get("audio_all"):
