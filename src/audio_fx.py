@@ -55,22 +55,45 @@ def ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
-def apply_fx(src: Path, dst: Path, preset: str = DEFAULT_PRESET) -> bool:
-    """src に整音エフェクトをかけて dst に出力。成功したら True。
+def _speed_filter(speed: float) -> str:
+    """再生スピード(0.5〜2.0)を atempo フィルタに(ピッチ維持)。等速なら空。"""
+    try:
+        s = float(speed)
+    except Exception:  # noqa: BLE001
+        return ""
+    if abs(s - 1.0) < 1e-3:
+        return ""
+    return f"atempo={max(0.5, min(2.0, s))}"
+
+
+def apply_fx(src: Path, dst: Path, preset: str | None = None, speed: float = 1.0) -> bool:
+    """src に 整音(preset)＋再生スピード(speed) をかけて dst に出力。成功で True。
 
     ffmpeg が無い/失敗した場合はエフェクト無しで src を dst にコピーし False を返す。
+    preset=None かつ等速なら何もせずコピー。
     """
     dst.parent.mkdir(parents=True, exist_ok=True)
+    parts: list[str] = []
+    if preset in PRESETS:
+        parts.append(build_filter(preset))
+    spd = _speed_filter(speed)
+    if spd:
+        parts.append(spd)
+
+    if not parts:  # 何もしない
+        if src.resolve() != dst.resolve():
+            shutil.copy(src, dst)
+        return True
     if not ffmpeg_available():
         print("[fx] ffmpeg が見つからないためエフェクト無しで出力します。")
         if src.resolve() != dst.resolve():
             shutil.copy(src, dst)
         return False
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-           "-i", str(src), "-af", build_filter(preset), str(dst)]
+           "-i", str(src), "-af", ",".join(parts), str(dst)]
     try:
         subprocess.run(cmd, check=True, capture_output=True)
-        print(f"[fx] 整音適用: preset={preset} -> {dst.name}")
+        print(f"[fx] 適用: preset={preset} speed={speed} -> {dst.name}")
         return True
     except Exception as e:  # noqa: BLE001
         print(f"[fx] ffmpeg 失敗({e}). エフェクト無しで出力します。")

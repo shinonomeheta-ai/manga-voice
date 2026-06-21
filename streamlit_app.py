@@ -89,14 +89,47 @@ def _insert_tone_tag(block_id: int, tag: str) -> None:
     st.session_state[key] = f"{tag} {cur}".rstrip()
 
 
-def _postprocess(audio: bytes, preset: str) -> bytes:
-    """一時ファイル経由で整音をかけて bytes を返す。ffmpeg 無しなら素のまま。"""
+def _postprocess(audio: bytes, preset: str | None = None) -> bytes:
+    """整音(preset)＋再生スピード(session_state['speed'])をかけて bytes を返す。"""
+    try:
+        speed = float(st.session_state.get("speed", 1.0) or 1.0)
+    except Exception:  # noqa: BLE001
+        speed = 1.0
+    if preset is None and abs(speed - 1.0) < 1e-3:
+        return audio
     with tempfile.TemporaryDirectory() as d:
         src = Path(d) / "raw.mp3"
         dst = Path(d) / "out.mp3"
         src.write_bytes(audio)
-        fx_mod.apply_fx(src, dst, preset=preset)
+        fx_mod.apply_fx(src, dst, preset=preset, speed=speed)
         return dst.read_bytes() if dst.exists() else audio
+
+
+def _reapply_effects() -> int:
+    """保持してある素の声(raw)に、現在の整音/速度を再適用(TTSなし=課金なし)。"""
+    preset = st.session_state.get("preset", "natural")
+    do_fx = st.session_state.get("do_fx", True)
+    n = 0
+    for bid in st.session_state.get("block_ids", []):
+        raw = st.session_state.get(f"raw_{bid}")
+        if raw:
+            st.session_state[f"audioN_{bid}"] = _postprocess(raw, "natural")
+            st.session_state[f"audioW_{bid}"] = _postprocess(raw, "warm")
+            n += 1
+    raw_all = st.session_state.get("raw_all")
+    if raw_all:
+        st.session_state["audio_all"] = _postprocess(raw_all, preset if do_fx else None)
+        n += 1
+    return n
+
+
+def _effective_text(speaker: str, text: str) -> str:
+    """タグが無いセリフに、キャラの基本トーン(サイドバー設定)を自動付与する。"""
+    text = (text or "").strip()
+    if not text or text.startswith("["):
+        return text
+    tone = st.session_state.get(f"chartone_{speaker}", "")
+    return f"{tone} {text}".strip() if tone else text
 
 
 def _gen_block(settings: Settings, chars: dict, bid: int) -> None:
@@ -108,10 +141,12 @@ def _gen_block(settings: Settings, chars: dict, bid: int) -> None:
         st.warning("セリフとキャラ（ボイス）を入れてください。")
         return
     stab = chars[spk].stability if spk in chars else "natural"
+    gen_txt = _effective_text(spk, txt)
     try:
         with st.spinner("生成中…（聴き比べ用に2版）"):
             # TTSは1回。整音だけ natural / warm の2版を作って聴き比べ
-            raw = tts_mod.synthesize_one(settings, txt, vid, stab, None, DEFAULT_OUTPUT_FORMAT)
+            raw = tts_mod.synthesize_one(settings, gen_txt, vid, stab, None, DEFAULT_OUTPUT_FORMAT)
+            st.session_state[f"raw_{bid}"] = raw  # 再適用用に素の声を保持
             st.session_state[f"audioN_{bid}"] = _postprocess(raw, "natural")
             st.session_state[f"audioW_{bid}"] = _postprocess(raw, "warm")
             _add_history(f"{spk}「{txt[:16]}」", st.session_state[f"audioN_{bid}"])
@@ -160,7 +195,8 @@ def _project_pairs() -> list[tuple[str, str]]:
 
 def _set_blocks(pairs: list[tuple[str, str]]) -> None:
     """(speaker, text) の並びでブロックを作り直す(idは0から振り直し)。"""
-    for k in [k for k in list(st.session_state.keys()) if str(k).startswith("audio")]:
+    for k in [k for k in list(st.session_state.keys())
+              if str(k).startswith(("audio", "raw"))]:
         del st.session_state[k]
     if not pairs:
         pairs = [("", "")]
@@ -210,10 +246,15 @@ def main() -> None:
         st.session_state.block_ids = [0]
         st.session_state.block_seq = 1
 
-    # ===== 左サイドバー: タブ(取り込み / 設定 / 履歴 / プロジェクト) =====
+    # サイドバーを少し広げる
+    st.markdown(
+        "<style>section[data-testid='stSidebar']{width:360px !important;}</style>",
+        unsafe_allow_html=True)
+
+    # ===== 左サイドバー: タブ(取り込み / 設定 / 感情 / 履歴 / プロジェクト) =====
     with st.sidebar:
-        tab_in, tab_cfg, tab_hist, tab_proj = st.tabs(
-            ["📥 取り込み", "⚙️ 設定", "🕘 履歴", "💾 プロジェクト"])
+        tab_in, tab_cfg, tab_char, tab_hist, tab_proj = st.tabs(
+            ["📥 取り込み", "⚙️ 設定", "🎭 感情", "🕘 履歴", "💾 プロジェクト"])
 
         with tab_in:
             st.caption("画像から感情付きで文字起こし")
@@ -255,7 +296,25 @@ def main() -> None:
             st.selectbox("整音プリセット", list(fx_mod.PRESETS.keys()), index=0,
                          format_func=lambda k: PRESET_LABELS.get(k, k), key="preset")
             st.checkbox("整音エフェクトをかける", value=True, key="do_fx")
+            st.slider("再生スピード", 0.5, 2.0, 1.0, 0.05, key="speed",
+                      help="1.0が等速。生成時に反映され、ダウンロードにも適用されます")
+            if st.button("🎛 現在の設定で再適用（再生成なし）", use_container_width=True,
+                         key="reapply", help="生成済みの声に整音/速度をかけ直す（ElevenLabs課金なし）"):
+                cnt = _reapply_effects()
+                st.success(f"{cnt} 件に再適用しました（TTSなし）")
+                st.rerun()
             st.caption("モデル: eleven_v3 固定")
+
+        with tab_char:
+            st.caption("キャラの基本トーン（タグが無いセリフに自動付与）")
+            label_to_tag = {lab: tag for lab, tag in TAG_CHOICES}
+            tone_opts = ["なし"] + [lab for lab, _ in TAG_CHOICES]
+            for name in char_names:
+                sel = st.selectbox(name, tone_opts, key=f"chartone_sel_{name}")
+                st.session_state[f"chartone_{name}"] = (
+                    "" if sel == "なし" else label_to_tag.get(sel, ""))
+            if not char_names:
+                st.caption("（割当済みキャラがありません）")
 
         with tab_hist:
             hist = st.session_state.get("history", [])
@@ -298,17 +357,15 @@ def main() -> None:
         voice_id = chars[spk].voice_id if spk in chars else spk
         if not voice_id:
             continue
-        lines.append({"text": txt, "voice_id": voice_id})
+        lines.append({"text": _effective_text(spk, txt), "voice_id": voice_id})
         stabs.append(chars[spk].stability if spk in chars else "natural")
         total += len(txt)
 
     # ===== メイン: 出力バー + 台本(全幅) =====
     st.title("🎙️ ボイス生成（共有版）")
     over = total > max_chars
-    ob1, ob2 = st.columns([3, 1])
-    ob1.caption(f"合計 {total} / {max_chars} 文字 ・ eleven_v3 ・ 設定はサイドバー")
-    if ob2.button("🔊 全部つなげて生成", type="primary",
-                  disabled=not lines or over, use_container_width=True):
+    if st.button("🔊 全部つなげて生成", type="primary",
+                 disabled=not lines or over, use_container_width=True):
         try:
             with st.spinner("生成中…（数秒）"):
                 if len(lines) == 1:
@@ -317,9 +374,10 @@ def main() -> None:
                         stabs[0], None, DEFAULT_OUTPUT_FORMAT)
                 else:
                     audio = tts_mod.synthesize_dialogue_bytes(settings, lines, DEFAULT_OUTPUT_FORMAT)
+                st.session_state["raw_all"] = audio  # 再適用用に素の声を保持
                 preset = st.session_state.get("preset", "natural")
                 do_fx = st.session_state.get("do_fx", True)
-                st.session_state["audio_all"] = _postprocess(audio, preset) if do_fx else audio
+                st.session_state["audio_all"] = _postprocess(audio, preset if do_fx else None)
                 _add_history(f"掛け合い {len(lines)}行", st.session_state["audio_all"])
         except Exception as e:  # noqa: BLE001
             st.session_state.pop("audio_all", None)
@@ -332,30 +390,32 @@ def main() -> None:
                            file_name="story.mp3", mime="audio/mp3", key="dl_all")
 
     st.divider()
-    st.caption("台本（番号順に読み上げ）")
 
-    # ドラッグで並べ替え(コンポーネントがある時のみ)
+    # ドラッグで並べ替え(コンポーネントがある時のみ・失敗してもアプリは落とさない)
     if sort_items is not None and len(st.session_state.block_ids) > 1:
         with st.expander("🔀 ドラッグで並べ替え"):
-            lab2bid = {}
-            labels = []
-            for pos, bid in enumerate(st.session_state.block_ids):
-                spk = st.session_state.get(f"spk_{bid}", "")
-                txt = st.session_state.get(f"txt_{bid}", "")
-                lab = f"[{bid}] {pos + 1}. {spk}｜{txt[:14]}"
-                labels.append(lab)
-                lab2bid[lab] = bid
-            ordered = sort_items(labels, direction="vertical", key="sorter")
-            new_ids = [lab2bid[x] for x in ordered if x in lab2bid]
-            if len(new_ids) == len(st.session_state.block_ids) and new_ids != st.session_state.block_ids:
-                st.session_state.block_ids = new_ids
-                st.rerun()
+            try:
+                lab2bid = {}
+                labels = []
+                for pos, bid in enumerate(st.session_state.block_ids):
+                    spk = st.session_state.get(f"spk_{bid}", "")
+                    txt = st.session_state.get(f"txt_{bid}", "")
+                    lab = f"[{bid}] {pos + 1}. {spk}｜{txt[:14]}"
+                    labels.append(lab)
+                    lab2bid[lab] = bid
+                ordered = sort_items(labels, direction="vertical", key="sorter")
+                new_ids = [lab2bid[x] for x in ordered if x in lab2bid]
+                if len(new_ids) == len(st.session_state.block_ids) and new_ids != st.session_state.block_ids:
+                    st.session_state.block_ids = new_ids
+                    st.rerun()
+            except Exception:  # noqa: BLE001 - コンポーネント障害でも落とさない
+                st.caption("（並べ替えコンポーネントが使えません。各ブロックで編集してください）")
 
     remove_id = None
     for i, bid in enumerate(st.session_state.block_ids):
         with st.container(border=True):
-            # 上段: 番号 + 話者 + アイコン操作(画像/感情タグ/生成/削除)
-            hdr = st.columns([1, 5, 1, 1, 1, 1])
+            # 上段: 番号 + 話者(左寄せ) + アイコン操作(画像/感情タグ/生成/削除) + 余白
+            hdr = st.columns([1, 2, 1, 1, 1, 1, 4])
             hdr[0].markdown(f"### {i + 1}")
             if char_names:
                 hdr[1].selectbox("キャラ", char_names, key=f"spk_{bid}",
@@ -391,7 +451,6 @@ def main() -> None:
             an = st.session_state.get(f"audioN_{bid}")
             aw = st.session_state.get(f"audioW_{bid}")
             if an or aw:
-                st.caption("🎧 聴き比べ")
                 cmp = st.columns(2)
                 if an:
                     cmp[0].caption("ナチュラル")
