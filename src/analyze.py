@@ -91,13 +91,21 @@ def analyze(
     language: str = "ja",
     character_bible: list[CharacterAsset] | None = None,
     max_tokens: int = 8000,
+    timeout: float = 180.0,
+    max_retries: int = 1,
 ) -> Script:
-    """inputs を解析して Script を返す。character_bible があれば話者同定に活用する。"""
+    """inputs を解析して Script を返す。character_bible があれば話者同定に活用する。
+
+    timeout/max_retries で1リクエストの待ち時間を上限化する。既定の SDK は
+    10分×2リトライで最大約30分待つため、固まると止まらない。ここで上限を切る。
+    """
     from anthropic import Anthropic  # 遅延import(解析時のみ必要)
 
     bible = character_bible or []
     images, texts = collect_inputs(inputs_dir)
-    client = Anthropic(api_key=settings.anthropic_api_key)
+    client = Anthropic(
+        api_key=settings.anthropic_api_key, timeout=timeout, max_retries=max_retries
+    )
     content = _build_content(images, texts, bible)
 
     bible_note = f" / キャラ資料 {len(bible)} 体" if bible else ""

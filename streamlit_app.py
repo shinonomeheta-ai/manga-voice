@@ -40,6 +40,11 @@ from src.config import DEFAULT_OUTPUT_FORMAT, CharacterBook, Settings
 
 st.set_page_config(page_title="ボイス生成（共有版）", page_icon="🎙️", layout="wide")
 
+# 画像/Notion の文字起こし(Claude Vision)に使うモデル。感情つき書き起こしには
+# Haiku で十分で、Opus の数分の1のコストで済む。APIキーは共有のまま、TTS など
+# 他処理は通常モデルのまま(モデルは呼び出しごとに指定するため切替できる)。
+TRANSCRIBE_MODEL = "claude-haiku-4-5"
+
 # トーン(声の調子)タグのみ。(日本語ラベル, 実際に挿入するv3タグ)。
 # 反応・効果音系([laughs]/[sigh]/[gasps]等)は非言語音が入るので含めない。
 # v3 は英語タグのみ解釈するため、ボタンは日本語表示・挿入は英語タグにする。
@@ -156,18 +161,26 @@ def _gen_block(settings: Settings, chars: dict, bid: int) -> None:
 
 
 def _analyze_images(settings: Settings, items: list[tuple[str, bytes]]):
-    """漫画画像(拡張子, バイト列)を Claude Vision で解析し Script を返す。"""
+    """漫画画像(拡張子, バイト列)を Claude Vision で解析し Script を返す。
+
+    文字起こし(画像/Notion)は安価な Haiku で十分なため、ここだけ TRANSCRIBE_MODEL
+    にモデルを差し替える。APIキーは共有のまま、TTS など他の処理には影響しない。
+    """
+    import dataclasses
+
     from src import assets as assets_mod
     from src.analyze import analyze as analyze_inputs
     from src.config import ASSETS_DIR, CharacterBook
 
+    settings = dataclasses.replace(settings, model=TRANSCRIBE_MODEL)
     with tempfile.TemporaryDirectory() as d:
         for k, (ext, data) in enumerate(items):
             (Path(d) / f"page_{k:03d}{(ext or '.png').lower()}").write_bytes(data)
         book = CharacterBook.load()
         bible = assets_mod.load_character_bible(ASSETS_DIR, book)
+        # 文字起こしは固まらないよう短めのタイムアウトで上限化(失敗は即エラー表示)。
         return analyze_inputs(settings, Path(d), language=book.language,
-                              character_bible=bible)
+                              character_bible=bible, timeout=120.0, max_retries=1)
 
 
 def _lines_of(script, char_names: list[str]) -> list[tuple[str, str]]:

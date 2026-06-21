@@ -47,3 +47,31 @@ def test_add_block_increases_blocks():
     add = next(b for b in at.button if "ブロックを追加" in (b.label or ""))
     add.click().run()
     assert len(at.session_state["block_ids"]) == 2
+
+
+def test_transcription_uses_cheaper_model(monkeypatch):
+    """画像/Notion の文字起こしだけ安価モデル(Haiku)に切り替わる(APIは呼ばない)。
+
+    TTS など他処理は元の settings.model のまま。共有キーは変えずモデルだけ差し替える。
+    """
+    import importlib
+
+    import src.analyze as analyze_mod
+    from src.config import Settings
+
+    app = importlib.import_module("streamlit_app")
+
+    captured: dict[str, str] = {}
+
+    def fake_analyze(settings, inputs_dir, **kwargs):
+        captured["model"] = settings.model
+        raise RuntimeError("stop")  # 解析直前で止める(実API/応答処理に進ませない)
+
+    monkeypatch.setattr(analyze_mod, "analyze", fake_analyze)
+    settings = Settings(anthropic_api_key="x", elevenlabs_api_key="y", model="claude-opus-4-8")
+    try:
+        app._analyze_images(settings, [(".png", b"fake")])
+    except RuntimeError:
+        pass
+    assert captured["model"] == app.TRANSCRIBE_MODEL == "claude-haiku-4-5"
+    assert settings.model == "claude-opus-4-8"  # 元の設定は不変
