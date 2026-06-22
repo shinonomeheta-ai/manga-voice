@@ -8,9 +8,19 @@ import pytest
 AppTest = pytest.importorskip("streamlit.testing.v1").AppTest
 
 
-def test_app_runs_without_secrets_and_warns_missing_key():
-    """secrets 未設定: 例外なく起動し、キー未設定の案内を出して止まる。"""
+def test_app_runs_without_secrets_scenario_default():
+    """secrets 未設定: 例外なく起動し、既定のシナリオ生成画面が出る。"""
     at = AppTest.from_file("streamlit_app.py").run()
+    assert not at.exception
+    titles = " ".join(t.value for t in at.title)
+    assert "シナリオ生成" in titles  # 既定はシナリオモード
+
+
+def test_voice_mode_warns_missing_elevenlabs_key():
+    """音声モードで ELEVENLABS 未設定なら案内を出して止まる。"""
+    at = AppTest.from_file("streamlit_app.py")
+    at.session_state["mode"] = "🎙️ 音声生成"
+    at.run()
     assert not at.exception
     msgs = " ".join(e.value for e in at.error)
     assert "ELEVENLABS_API_KEY" in msgs
@@ -31,6 +41,7 @@ def test_tone_tag_button_inserts_at_front():
     """ブロックのトーンタグボタンを押すと、そのブロックの文頭にタグが入る。"""
     at = AppTest.from_file("streamlit_app.py")
     at.secrets["ELEVENLABS_API_KEY"] = "dummy"   # パスワード無し→本体UIに到達
+    at.session_state["mode"] = "🎙️ 音声生成"
     at.run()
     assert not at.exception
     btn = next(b for b in at.button if b.key == "tag_0_0")  # ブロック0の [excited]
@@ -42,6 +53,7 @@ def test_add_block_increases_blocks():
     """「ブロックを追加」で行が増える(キャラごとに足せる)。"""
     at = AppTest.from_file("streamlit_app.py")
     at.secrets["ELEVENLABS_API_KEY"] = "dummy"
+    at.session_state["mode"] = "🎙️ 音声生成"
     at.run()
     assert at.session_state["block_ids"] == [0]
     add = next(b for b in at.button if "ブロックを追加" in (b.label or ""))
