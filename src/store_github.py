@@ -14,6 +14,7 @@ import base64
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -76,7 +77,9 @@ class GitHubStore:
             )
 
     def _path(self, name: str) -> str:
-        return f"/repos/{self.repo}/contents/{self.directory}/{slug(name)}.json"
+        # 日本語ファイル名はURLに生で入れられないためパーセントエンコードする。
+        p = urllib.parse.quote(f"{self.directory}/{slug(name)}.json")
+        return f"/repos/{self.repo}/contents/{p}"
 
     # --- 公開API ---
     def ensure_branch(self) -> None:

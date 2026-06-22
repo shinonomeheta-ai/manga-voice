@@ -390,8 +390,8 @@ def main() -> None:
 
     # ===== 左サイドバー: タブ(取り込み / 設定 / 感情 / 履歴 / プロジェクト) =====
     with st.sidebar:
-        tab_in, tab_cfg, tab_cast, tab_hist, tab_proj = st.tabs(
-            ["📥 取り込み", "⚙️ 設定", "🎭 キャラ・感情", "🕘 履歴", "💾 プロジェクト"])
+        tab_proj, tab_in, tab_cfg, tab_cast, tab_hist = st.tabs(
+            ["💾 プロジェクト", "📥 取り込み", "⚙️ 設定", "🎭 キャラ・感情", "🕘 履歴"])
 
         with tab_in:
             st.caption("画像から感情付きで文字起こし")
@@ -530,7 +530,7 @@ def main() -> None:
                     st.audio(h["audio"], format="audio/mp3")
 
         with tab_proj:
-            st.markdown("**📂 プロジェクト**（VSのソリューションのように開閉）")
+            st.markdown("**📂 プロジェクト**")
             proj_name = st.text_input("プロジェクト名", key="proj_name",
                                       placeholder="例: ななしちゃん第1話")
             proj_settings = {

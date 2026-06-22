@@ -23,6 +23,14 @@ def test_names_from_listing_filters_json():
     assert names_from_listing(entries) == ["a", "b"]
 
 
+def test_path_is_ascii_safe_for_japanese_names():
+    """日本語名でもURLパスはASCII化される(urllibのエンコード失敗を防ぐ)。"""
+    store = GitHubStore("tok", "owner/repo")
+    p = store._path("ななしちゃん第1話")
+    p.encode("ascii")  # 例外が出なければOK
+    assert "%" in p and "/contents/projects/" in p
+
+
 def test_requires_token_and_repo():
     with pytest.raises(GitHubError):
         GitHubStore("", "owner/repo")
