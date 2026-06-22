@@ -141,6 +141,14 @@ def _effective_text(speaker: str, text: str) -> str:
     return f"{tone} {text}".strip() if tone else text
 
 
+def _block_stability(bid: int, spk: str, chars: dict) -> str:
+    """ブロックの安定性: ブロック個別の上書きがあれば優先、無ければキャラ既定。"""
+    ov = st.session_state.get(f"bstab_{bid}", "")
+    if ov in ("creative", "natural", "robust"):
+        return ov
+    return chars[spk].stability if spk in chars else "natural"
+
+
 def _gen_block(settings: Settings, chars: dict, bid: int) -> None:
     """1ブロックだけ合成して session_state[audio_<bid>] に保存(整音設定はsecrets/UI値)。"""
     spk = (st.session_state.get(f"spk_{bid}", "") or "").strip()
@@ -149,7 +157,7 @@ def _gen_block(settings: Settings, chars: dict, bid: int) -> None:
     if not txt or not vid:
         st.warning("セリフとキャラ（ボイス）を入れてください。")
         return
-    stab = chars[spk].stability if spk in chars else "natural"
+    stab = _block_stability(bid, spk, chars)
     gen_txt = _effective_text(spk, txt)
     prog = st.progress(0, text="生成の準備中…")
     stage = "準備"
@@ -386,7 +394,7 @@ def _gen_all_blocks(settings: Settings, chars: dict) -> int:
                 continue
             prog.progress(int(idx / max(1, len(ids)) * 100),
                           text=f"🎙️ {idx+1}/{len(ids)}：{spk or '—'}")
-            stab = chars[spk].stability if spk in chars else "natural"
+            stab = _block_stability(bid, spk, chars)
             raw = tts_mod.synthesize_one(settings, _effective_text(spk, txt), vid, stab,
                                          None, DEFAULT_OUTPUT_FORMAT)
             st.session_state[f"raw_{bid}"] = raw
@@ -781,7 +789,7 @@ def main() -> None:
         if not voice_id:
             continue
         lines.append({"text": _effective_text(spk, txt), "voice_id": voice_id})
-        stabs.append(chars[spk].stability if spk in chars else "natural")
+        stabs.append(_block_stability(bid, spk, chars))
         total += len(txt)
 
     # ===== メイン: タイトル(プロジェクト名) + 操作 + 台本 =====
@@ -907,7 +915,15 @@ def main() -> None:
                         st.rerun()
                     except Exception as e:  # noqa: BLE001
                         st.error(f"文字起こしに失敗: {e}")
-            with hdr[3].popover("🎭", use_container_width=True, help="感情タグを挿入"):
+            with hdr[3].popover("🎭", use_container_width=True, help="感情タグ・安定性"):
+                st.selectbox("安定性（このブロック）",
+                             ["キャラ既定", "creative", "natural", "robust"],
+                             key=f"bstab_sel_{bid}",
+                             help="creative=抑揚が出る/robust=安定だが平板")
+                st.session_state[f"bstab_{bid}"] = (
+                    "" if st.session_state.get(f"bstab_sel_{bid}") == "キャラ既定"
+                    else st.session_state.get(f"bstab_sel_{bid}", ""))
+                st.caption("感情タグ（文頭に挿入）")
                 for j, (label, tag) in enumerate(TAG_CHOICES):
                     st.button(label, key=f"tag_{bid}_{j}", use_container_width=True,
                               on_click=_insert_tone_tag, args=(bid, tag))
