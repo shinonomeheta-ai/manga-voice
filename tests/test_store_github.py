@@ -71,3 +71,29 @@ def test_save_then_load_roundtrip(monkeypatch):
     assert store.list_projects() == ["第1話"]
     # PUT が呼ばれている(=保存処理が走った)
     assert any(c.startswith("PUT ") for c in calls)
+
+
+def test_save_load_cast_roundtrip(monkeypatch):
+    """既定キャスト(ボイスID)をサイト共通で保存/読込できる。"""
+    store = GitHubStore("tok", "owner/repo")
+    state: dict[str, bytes] = {}
+
+    def fake_request(method, path, body=None):
+        p = path.split("?")[0]
+        if method == "GET" and "/branches/" in p:
+            return 200, {"name": "data"}
+        if method == "GET" and p.endswith("/contents/cast.json"):
+            if p in state:
+                return 200, {"content": base64.b64encode(state[p]).decode(), "sha": "s"}
+            return 404, None
+        if method == "PUT" and p.endswith("/contents/cast.json"):
+            state[p] = base64.b64decode(body["content"])
+            return 200, {"content": {}}
+        raise AssertionError(f"想定外: {method} {path}")
+
+    monkeypatch.setattr(store, "_request", fake_request)
+
+    assert store.load_cast() is None  # 未保存
+    cast = {"あかり": {"voice_id": "vid_a", "stability": "natural"}}
+    store.save_cast(cast)
+    assert store.load_cast() == cast

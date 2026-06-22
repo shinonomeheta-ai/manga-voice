@@ -518,25 +518,31 @@ def main() -> None:
                         elevenlabs_api_key=api_key)
     max_chars = int(_secret("MAX_CHARS", "800") or 800)
 
-    # キャスト(キャラ→ボイスID)はブラウザで編集可能。初回は characters.json から種を作る。
-    book = CharacterBook.load()
-    if "cast" not in st.session_state:
-        st.session_state["cast"] = {
-            n: {"voice_id": c.voice_id, "stability": c.stability}
-            for n, c in book.characters.items() if c.is_assigned()
-        }
-    cast = st.session_state["cast"]
-    chars = {n: Character(name=n, voice_id=d.get("voice_id", ""),
-                          stability=d.get("stability", "natural"))
-             for n, d in cast.items() if (d.get("voice_id") or "").strip()}
-    char_names = list(chars.keys())
-
-    # GitHub保存(プロジェクトの保存先)。トークン未設定なら None。
+    # GitHub保存(プロジェクト/既定キャストの保存先)。トークン未設定なら None。
     gh_store = None
     if _secret("GITHUB_TOKEN"):
         from src import store_github as gh_mod
         gh_store = gh_mod.GitHubStore(
             _secret("GITHUB_TOKEN"), _secret("GITHUB_REPO", "shinonomeheta-ai/manga-voice"))
+
+    # キャスト(キャラ→ボイスID)。初回は「既定キャスト(クラウド)」→無ければ characters.json。
+    book = CharacterBook.load()
+    if "cast" not in st.session_state:
+        seeded = None
+        if gh_store is not None:
+            try:
+                seeded = gh_store.load_cast()
+            except Exception:  # noqa: BLE001 - クラウド未設定/失敗でも起動する
+                seeded = None
+        if not seeded:
+            seeded = {n: {"voice_id": c.voice_id, "stability": c.stability}
+                      for n, c in book.characters.items() if c.is_assigned()}
+        st.session_state["cast"] = seeded
+    cast = st.session_state["cast"]
+    chars = {n: Character(name=n, voice_id=d.get("voice_id", ""),
+                          stability=d.get("stability", "natural"))
+             for n, d in cast.items() if (d.get("voice_id") or "").strip()}
+    char_names = list(chars.keys())
 
     def _save_project_to_cloud() -> str:
         """現在の台本＋設定＋キャストをプロジェクト名でクラウド保存し、名前を返す。"""
@@ -623,6 +629,17 @@ def main() -> None:
                 st.session_state["cast"] = new_cast
                 st.rerun()
             st.caption("空欄のキャラは生成対象から外れます。変更はプロジェクト保存に含まれます。")
+            if st.button("💾 この割り当てを既定として保存", use_container_width=True,
+                         key="cast_save_default", disabled=gh_store is None,
+                         help="サイト共通の既定キャストとして保存。次回・新規でも自動で読み込まれます"):
+                try:
+                    with st.spinner("既定キャストを保存中…"):
+                        gh_store.save_cast(st.session_state["cast"])
+                    st.success("既定キャストとして保存しました（次回から自動で読み込まれます）。")
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"保存に失敗: {e}")
+            if gh_store is None:
+                st.caption("※ GITHUB_TOKEN を設定すると、ボイスIDをサイトに永続保存できます")
 
             st.divider()
             st.markdown("**基本トーン（感情）**")

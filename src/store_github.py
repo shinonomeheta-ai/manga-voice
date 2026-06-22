@@ -81,6 +81,35 @@ class GitHubStore:
         p = urllib.parse.quote(f"{self.directory}/{slug(name)}.json")
         return f"/repos/{self.repo}/contents/{p}"
 
+    def _put_json(self, rel_path: str, data: dict[str, Any], message: str) -> None:
+        """ブランチ上の rel_path に JSON を作成/上書きする(汎用)。"""
+        self.ensure_branch()
+        full = f"/repos/{self.repo}/contents/{urllib.parse.quote(rel_path)}"
+        st, existing = self._request("GET", f"{full}?ref={self.branch}")
+        content = base64.b64encode(
+            json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+        ).decode("ascii")
+        body: dict[str, Any] = {"message": message, "content": content, "branch": self.branch}
+        if st == 200 and existing:
+            body["sha"] = existing["sha"]
+        self._request("PUT", full, body)
+
+    def _get_json(self, rel_path: str) -> dict[str, Any] | None:
+        """ブランチ上の rel_path の JSON を読む。無ければ None。"""
+        full = f"/repos/{self.repo}/contents/{urllib.parse.quote(rel_path)}"
+        st, data = self._request("GET", f"{full}?ref={self.branch}")
+        if st == 404 or not data:
+            return None
+        return json.loads(base64.b64decode(data["content"]).decode("utf-8"))
+
+    def save_cast(self, cast: dict[str, Any]) -> None:
+        """既定キャスト(キャラ→ボイスID/安定性)をサイト共通として保存する。"""
+        self._put_json("cast.json", cast, "save default cast")
+
+    def load_cast(self) -> dict[str, Any] | None:
+        """既定キャストを読む(未保存なら None)。"""
+        return self._get_json("cast.json")
+
     # --- 公開API ---
     def ensure_branch(self) -> None:
         """保存先ブランチが無ければ main(無ければ master)から作成する。"""
