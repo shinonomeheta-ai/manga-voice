@@ -77,6 +77,41 @@ def test_transcription_uses_cheaper_model(monkeypatch):
     assert settings.model == "claude-opus-4-8"  # 元の設定は不変
 
 
+def test_project_save_zip_load_roundtrip():
+    """プロジェクト(台本＋設定＋音声)をZIP保存し、読み込みで復元できる。"""
+    import importlib
+    import zipfile
+
+    app = importlib.import_module("streamlit_app")
+    pairs = [("太郎", "[excited] やったー"), ("花子", "おめでとう")]
+    settings = {"preset": "warm", "speed": 1.25, "do_fx": True,
+                "char_tone": {"太郎": "[happy]"}}
+    castmap = {"太郎": {"voice_id": "vid_taro", "stability": "natural"}}
+    proj = app._build_project("第1話テスト", pairs, settings, castmap)
+    assert proj["name"] == "第1話テスト"
+    assert proj["blocks"][0] == {"speaker": "太郎", "text": "[excited] やったー"}
+    assert proj["characters"]["太郎"]["voice_id"] == "vid_taro"
+
+    blob = app._project_zip(proj, [("audio_all.mp3", b"ID3audio"),
+                                   ("01_taro_natural.mp3", b"clip")])
+    # ZIPの中身が正しいこと
+    with zipfile.ZipFile(__import__("io").BytesIO(blob)) as z:
+        assert "project.json" in z.namelist()
+        assert z.read("audio_all.mp3") == b"ID3audio"
+
+    # ZIPから読み戻すと元のプロジェクトdictに戻る
+    restored = app._parse_project("第1話テスト.zip", blob)
+    assert restored["blocks"] == proj["blocks"]
+    assert restored["settings"]["speed"] == 1.25
+    assert restored["characters"]["太郎"]["voice_id"] == "vid_taro"  # キャストも復元
+
+    # 設定 -> ウィジェットキーへの変換(感情タグはラベルに戻る)
+    state = app._settings_to_state(restored["settings"])
+    assert state["preset"] == "warm"
+    assert state["speed"] == 1.25
+    assert state["chartone_sel_太郎"] == "うれしい"  # [happy] のラベル
+
+
 def test_analyze_images_batches_and_merges(monkeypatch):
     """画像が多いと batch 枚ずつに分割して解析し、結果を1本に結合する(413回避)。"""
     import importlib

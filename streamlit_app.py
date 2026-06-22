@@ -18,7 +18,9 @@ import datetime
 import io
 import json
 import os
+import re
 import tempfile
+import zipfile
 from pathlib import Path
 
 import streamlit as st
@@ -37,6 +39,7 @@ from src import audio_fx as fx_mod
 from src import notion as notion_mod
 from src import tts as tts_mod
 from src.config import DEFAULT_OUTPUT_FORMAT, CharacterBook, Settings
+from src.models import Character
 
 st.set_page_config(page_title="ボイス生成（共有版）", page_icon="🎙️", layout="wide")
 
@@ -247,6 +250,59 @@ def _project_pairs() -> list[tuple[str, str]]:
             for b in st.session_state.get("block_ids", [])]
 
 
+def _build_project(name: str, pairs: list[tuple[str, str]], settings: dict,
+                   characters: dict | None = None) -> dict:
+    """プロジェクト1件を表すdictを組む(台本＋設定＋キャスト)。保存/ZIPの共通フォーマット。"""
+    return {
+        "version": 3,
+        "name": (name or "project").strip() or "project",
+        "saved_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "settings": settings,
+        "characters": characters or {},
+        "blocks": [{"speaker": s, "text": t} for s, t in pairs],
+    }
+
+
+def _project_zip(proj: dict, audio_files: list[tuple[str, bytes]]) -> bytes:
+    """project.json と生成音声(mp3群)を1つのZIPにまとめてバイト列で返す。"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("project.json", json.dumps(proj, ensure_ascii=False, indent=2))
+        for fname, data in audio_files:
+            z.writestr(fname, data)
+    return buf.getvalue()
+
+
+def _parse_project(filename: str, raw: bytes) -> dict:
+    """アップロードされた .json か .zip からプロジェクトdictを取り出す。"""
+    if filename.lower().endswith(".zip"):
+        with zipfile.ZipFile(io.BytesIO(raw)) as z:
+            raw = z.read("project.json")
+    return json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+
+
+def _tag_to_label(tag: str) -> str:
+    """感情タグ(例 [excited])を tab_char の選択肢ラベルに戻す(無→「なし」)。"""
+    for lab, t in TAG_CHOICES:
+        if t == tag:
+            return lab
+    return "なし"
+
+
+def _settings_to_state(s: dict) -> dict:
+    """保存した settings を、ウィジェットキーへ流し込む形(_pending_settings)に変換。"""
+    out: dict = {}
+    if "preset" in s:
+        out["preset"] = s["preset"]
+    if "speed" in s:
+        out["speed"] = float(s["speed"])
+    if "do_fx" in s:
+        out["do_fx"] = bool(s["do_fx"])
+    for name, tag in (s.get("char_tone") or {}).items():
+        out[f"chartone_sel_{name}"] = _tag_to_label(tag)
+    return out
+
+
 def _set_blocks(pairs: list[tuple[str, str]]) -> None:
     """(speaker, text) の並びでブロックを作り直す(idは0から振り直し)。"""
     for k in [k for k in list(st.session_state.keys())
@@ -284,6 +340,15 @@ def main() -> None:
     if not _check_password():
         st.stop()
 
+    # プロジェクト読込時の設定復元: ウィジェット生成より前に流し込む
+    # (生成後だと "widget instantiated 後の変更" エラーになるため最上段で適用)。
+    for k, v in (st.session_state.pop("_pending_settings", None) or {}).items():
+        st.session_state[k] = v
+    pend_cast = st.session_state.pop("_pending_cast", None)
+    if pend_cast is not None:
+        st.session_state["cast"] = pend_cast
+        st.session_state["cast_ver"] = st.session_state.get("cast_ver", 0) + 1
+
     api_key = _secret("ELEVENLABS_API_KEY")
     if not api_key:
         st.error("管理者へ: Secrets に ELEVENLABS_API_KEY を設定してください。")
@@ -292,8 +357,17 @@ def main() -> None:
                         elevenlabs_api_key=api_key)
     max_chars = int(_secret("MAX_CHARS", "800") or 800)
 
+    # キャスト(キャラ→ボイスID)はブラウザで編集可能。初回は characters.json から種を作る。
     book = CharacterBook.load()
-    chars = {n: c for n, c in book.characters.items() if c.is_assigned()}
+    if "cast" not in st.session_state:
+        st.session_state["cast"] = {
+            n: {"voice_id": c.voice_id, "stability": c.stability}
+            for n, c in book.characters.items() if c.is_assigned()
+        }
+    cast = st.session_state["cast"]
+    chars = {n: Character(name=n, voice_id=d.get("voice_id", ""),
+                          stability=d.get("stability", "natural"))
+             for n, d in cast.items() if (d.get("voice_id") or "").strip()}
     char_names = list(chars.keys())
 
     if "block_ids" not in st.session_state:
@@ -307,8 +381,8 @@ def main() -> None:
 
     # ===== 左サイドバー: タブ(取り込み / 設定 / 感情 / 履歴 / プロジェクト) =====
     with st.sidebar:
-        tab_in, tab_cfg, tab_char, tab_hist, tab_proj = st.tabs(
-            ["📥 取り込み", "⚙️ 設定", "🎭 感情", "🕘 履歴", "💾 プロジェクト"])
+        tab_in, tab_cfg, tab_char, tab_cast, tab_hist, tab_proj = st.tabs(
+            ["📥 取り込み", "⚙️ 設定", "🎭 感情", "🎚 キャラ", "🕘 履歴", "💾 プロジェクト"])
 
         with tab_in:
             st.caption("画像から感情付きで文字起こし")
@@ -404,6 +478,34 @@ def main() -> None:
             if not char_names:
                 st.caption("（割当済みキャラがありません）")
 
+        with tab_cast:
+            st.caption("キャラ名とボイスIDの割り当て（行の追加・削除・編集ができます）")
+            ver = st.session_state.get("cast_ver", 0)
+            rows = [{"キャラ": n, "voice_id": d.get("voice_id", ""),
+                     "stability": d.get("stability", "natural")}
+                    for n, d in cast.items()]
+            edited = st.data_editor(
+                rows, num_rows="dynamic", use_container_width=True,
+                key=f"cast_editor_{ver}",
+                column_config={
+                    "キャラ": st.column_config.TextColumn("キャラ", required=True),
+                    "voice_id": st.column_config.TextColumn("ボイスID（ElevenLabs）"),
+                    "stability": st.column_config.SelectboxColumn(
+                        "安定性", options=["creative", "natural", "robust"],
+                        default="natural"),
+                })
+            new_cast: dict = {}
+            for r in edited:
+                nm = str(r.get("キャラ") or "").strip()
+                if not nm:
+                    continue
+                new_cast[nm] = {"voice_id": str(r.get("voice_id") or "").strip(),
+                                "stability": r.get("stability") or "natural"}
+            if new_cast != cast:  # 編集が入ったら反映して再描画(ボイス一覧を更新)
+                st.session_state["cast"] = new_cast
+                st.rerun()
+            st.caption("空欄のキャラは生成対象から外れます。変更はプロジェクト保存に含まれます。")
+
         with tab_hist:
             hist = st.session_state.get("history", [])
             if not hist:
@@ -417,18 +519,58 @@ def main() -> None:
                     st.audio(h["audio"], format="audio/mp3")
 
         with tab_proj:
-            proj = {"version": 1,
-                    "blocks": [{"speaker": s, "text": t} for s, t in _project_pairs()]}
-            st.download_button("⬇️ 保存（JSON）", json.dumps(proj, ensure_ascii=False, indent=2),
-                               file_name="project.json", mime="application/json",
+            st.caption("台本＋設定（整音/速度/キャラ別感情）を1プロジェクトとして保存")
+            proj_name = st.text_input("プロジェクト名", key="proj_name",
+                                      placeholder="例: ななしちゃん第1話")
+            proj_settings = {
+                "preset": st.session_state.get("preset", "natural"),
+                "speed": float(st.session_state.get("speed", 1.0) or 1.0),
+                "do_fx": bool(st.session_state.get("do_fx", True)),
+                "char_tone": {n: st.session_state.get(f"chartone_{n}", "")
+                              for n in char_names if st.session_state.get(f"chartone_{n}", "")},
+            }
+            proj = _build_project(proj_name, _project_pairs(), proj_settings, cast)
+            fbase = re.sub(r"[^0-9A-Za-z぀-ヿ一-鿿_-]+", "_", proj["name"])[:40] or "project"
+
+            st.download_button("⬇️ 台本＋設定を保存（JSON）",
+                               json.dumps(proj, ensure_ascii=False, indent=2),
+                               file_name=f"{fbase}.json", mime="application/json",
                                use_container_width=True, key="proj_dl")
-            upj = st.file_uploader("📂 読み込み（JSON）", type=["json"], key="proj_up")
+
+            # 音声込みZIP: 生成済みの全部つなげ音声＋各ブロックの2版をまとめる
+            audio_files: list[tuple[str, bytes]] = []
+            if st.session_state.get("audio_all"):
+                audio_files.append(("audio_all.mp3", st.session_state["audio_all"]))
+            for pos, b in enumerate(st.session_state.block_ids):
+                spk = (st.session_state.get(f"spk_{b}", "") or "blk").strip() or "blk"
+                safe = re.sub(r"[^0-9A-Za-z぀-ヿ一-鿿_-]+", "_", spk)[:16]
+                if st.session_state.get(f"audioN_{b}"):
+                    audio_files.append((f"{pos+1:02d}_{safe}_natural.mp3",
+                                        st.session_state[f"audioN_{b}"]))
+                if st.session_state.get(f"audioW_{b}"):
+                    audio_files.append((f"{pos+1:02d}_{safe}_warm.mp3",
+                                        st.session_state[f"audioW_{b}"]))
+            st.download_button("⬇️ 音声込みで保存（ZIP）",
+                               _project_zip(proj, audio_files) if audio_files else b"",
+                               file_name=f"{fbase}.zip", mime="application/zip",
+                               use_container_width=True, key="proj_zip",
+                               disabled=not audio_files,
+                               help="生成済みの音声(全部つなげ＋各ブロック2版)と台本をまとめます")
+            if not audio_files:
+                st.caption("※ 音声を生成するとZIP保存が有効になります")
+
+            st.divider()
+            upj = st.file_uploader("📂 読み込み（JSON / ZIP）", type=["json", "zip"], key="proj_up")
             if upj is not None and st.button("読み込む", use_container_width=True, key="proj_load"):
                 try:
-                    data = json.loads(upj.getvalue().decode("utf-8"))
+                    data = _parse_project(upj.name, upj.getvalue())
                     _set_blocks([(b.get("speaker", ""), b.get("text", ""))
                                  for b in data.get("blocks", [])])
-                    st.success("読み込みました。")
+                    st.session_state["_pending_settings"] = _settings_to_state(
+                        data.get("settings", {}))
+                    if data.get("characters"):  # キャスト(キャラ→ID)も復元
+                        st.session_state["_pending_cast"] = data["characters"]
+                    st.success(f"「{data.get('name', 'project')}」を読み込みました。")
                     st.rerun()
                 except Exception as e:  # noqa: BLE001
                     st.error(f"読み込み失敗: {e}")
