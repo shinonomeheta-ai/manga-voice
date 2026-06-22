@@ -531,6 +531,8 @@ def main() -> None:
 
         with tab_proj:
             st.markdown("**📂 プロジェクト**")
+            if st.session_state.get("_flash"):  # 直前の保存/読込の結果(rerunで消えないよう保持)
+                st.success(st.session_state.pop("_flash"))
             proj_name = st.text_input("プロジェクト名", key="proj_name",
                                       placeholder="例: ななしちゃん第1話")
             proj_settings = {
@@ -561,24 +563,25 @@ def main() -> None:
                     names = []
                     st.error(f"一覧の取得に失敗: {e}")
                 if names:
-                    pick = st.selectbox("保存済みプロジェクトを開く", names, key="gh_pick")
-                    c1, c2 = st.columns([3, 1])
-                    if c1.button("📂 開く", use_container_width=True, key="gh_load"):
-                        try:
-                            with st.spinner("GitHubから読み込み中…"):
-                                data = store.load_project(pick)
-                            _restore_project(data)
-                            st.success(f"「{data.get('name', pick)}」を開きました。")
-                            st.rerun()
-                        except Exception as e:  # noqa: BLE001
-                            st.error(f"クラウド読み込みに失敗: {e}")
-                    if c2.button("🗑", use_container_width=True, key="gh_del", help="削除"):
-                        try:
-                            store.delete_project(pick)
-                            st.success("削除しました。")
-                            st.rerun()
-                        except Exception as e:  # noqa: BLE001
-                            st.error(f"削除に失敗: {e}")
+                    st.caption(f"保存済みプロジェクト（{len(names)}件） — クリックで開く")
+                    for i, nm in enumerate(names):
+                        c1, c2 = st.columns([5, 1])
+                        if c1.button(f"📂 {nm}", use_container_width=True, key=f"gh_open_{i}"):
+                            try:
+                                with st.spinner("GitHubから読み込み中…"):
+                                    data = store.load_project(nm)
+                                _restore_project(data)
+                                st.session_state["_flash"] = f"「{data.get('name', nm)}」を開きました。"
+                                st.rerun()
+                            except Exception as e:  # noqa: BLE001
+                                st.error(f"読み込みに失敗: {e}")
+                        if c2.button("🗑", key=f"gh_del_{i}", help=f"{nm} を削除"):
+                            try:
+                                store.delete_project(nm)
+                                st.session_state["_flash"] = f"「{nm}」を削除しました。"
+                                st.rerun()
+                            except Exception as e:  # noqa: BLE001
+                                st.error(f"削除に失敗: {e}")
                 else:
                     st.caption("（まだクラウドに保存がありません）")
                 if st.button("💾 このプロジェクトをクラウドに保存", use_container_width=True,
@@ -586,7 +589,9 @@ def main() -> None:
                     try:
                         with st.spinner("GitHubに保存中…"):
                             store.save_project(proj["name"], proj)
-                        st.success(f"クラウドに保存しました（{proj['name']}）。")
+                        st.session_state["_flash"] = (
+                            f"クラウドに保存しました（{proj['name']}）。"
+                            "上の一覧に表示されます。")
                         st.rerun()
                     except Exception as e:  # noqa: BLE001
                         st.error(f"クラウド保存に失敗: {e}")
