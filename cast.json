@@ -2,7 +2,7 @@
   "ナレーター": {
     "voice_id": "deKmbWEKZdwxcKxxcfvP",
     "stability": "robust",
-    "tone": "[whispers]"
+    "tone": ""
   },
   "桐原": {
     "voice_id": "4sirbXwrtRlmPV80MJkQ",
@@ -30,7 +30,7 @@
     "tone": ""
   },
   "ななし": {
-    "voice_id": "NrGpiA92Gz9B93xLbfzg",
+    "voice_id": "ngvNHfiCrXLPAHcTrZK1",
     "stability": "natural",
     "tone": ""
   }
