@@ -249,6 +249,15 @@ def _match_speaker(name: str, char_names: list[str]) -> str:
     return char_names[0] if char_names else name
 
 
+def _merge_cast(project_cast: dict, current_cast: dict) -> dict:
+    """プロジェクトのキャストに現在(既定)のキャストを重ね、現在を優先する。
+
+    プロジェクトを開き直しても、既定として保存した最新のボイス割り当てが
+    保たれる(プロジェクトにしか居ないキャラだけ取り込む)。
+    """
+    return {**(project_cast or {}), **(current_cast or {})}
+
+
 def _lines_of(script, char_names: list[str]) -> list[tuple[str, str]]:
     out = []
     for scene in script.scenes:
@@ -498,7 +507,9 @@ def main() -> None:
         st.session_state[k] = v
     pend_cast = st.session_state.pop("_pending_cast", None)
     if pend_cast is not None:
-        st.session_state["cast"] = pend_cast
+        # プロジェクト内の(古い)割り当てより、現在＝既定のボイス割り当てを優先。
+        # プロジェクトにしか居ないキャラだけ取り込む(開き直すと声が戻る問題を防ぐ)。
+        st.session_state["cast"] = _merge_cast(pend_cast, st.session_state.get("cast", {}))
         st.session_state["cast_ver"] = st.session_state.get("cast_ver", 0) + 1
     if "_pending_name" in st.session_state:
         st.session_state["proj_name"] = st.session_state.pop("_pending_name")

@@ -112,6 +112,19 @@ def test_project_save_zip_load_roundtrip():
     assert state["chartone_sel_太郎"] == "うれしい"  # [happy] のラベル
 
 
+def test_merge_cast_prefers_current_voices():
+    """プロジェクトを開いても、現在(既定)のボイス割り当てが優先される。"""
+    import importlib
+
+    app = importlib.import_module("streamlit_app")
+    project = {"あかり": {"voice_id": "OLD", "stability": "natural"},
+               "脇役": {"voice_id": "vid_sub", "stability": "natural"}}
+    current = {"あかり": {"voice_id": "NEW", "stability": "creative"}}
+    merged = app._merge_cast(project, current)
+    assert merged["あかり"]["voice_id"] == "NEW"      # 既定が勝つ
+    assert merged["脇役"]["voice_id"] == "vid_sub"     # projectのみのキャラは取り込む
+
+
 def test_match_speaker_tolerates_honorifics():
     """キャラシートの「あかりちゃん」をキャスト「あかり」にゆるく一致させる。"""
     import importlib
