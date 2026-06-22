@@ -1,7 +1,7 @@
 {
   "version": 3,
   "name": "ななしちゃん1話",
-  "saved_at": "2026-06-22T01:22:52",
+  "saved_at": "2026-06-22T05:51:35",
   "settings": {
     "preset": "natural",
     "speed": 1.0,
@@ -34,82 +34,70 @@
       "stability": "creative"
     },
     "ななし": {
-      "voice_id": "NrGpiA92Gz9B93xLbfzg",
+      "voice_id": "ngvNHfiCrXLPAHcTrZK1",
       "stability": "natural"
     }
   },
   "blocks": [
     {
       "speaker": "ななし",
-      "text": "[whispers] あかりちゃん…どこにいるの…？"
-    },
-    {
-      "speaker": "あかり",
-      "text": "[excited] わーい！[cheerful] 懐かしい！！"
+      "text": "[不安げに]  あかりちゃん…どこにいるの…？"
     },
     {
       "speaker": "ななし",
-      "text": "[hesitant] あれは…？"
+      "text": "[excited] わぁ～！！[cheerful] 懐かしい！！"
     },
     {
-      "speaker": "あかり",
+      "speaker": "ななし",
+      "text": "[hesitant] ん…あれは…？"
+    },
+    {
+      "speaker": "ななし",
       "text": "[cheerful] こんなのもパチンコになってるんだ"
     },
     {
       "speaker": "ななし",
-      "text": "ずっと観てたなあ"
+      "text": "[excited] [懐かしみながら]子供のときずっと観てたな～！！"
+    },
+    {
+      "speaker": "ななし",
+      "text": "[excited] あっ…！あかりさん…！？"
+    },
+    {
+      "speaker": "ななし",
+      "text": "[excited] 今度打ってみてもいいかも！"
+    },
+    {
+      "speaker": "ななし",
+      "text": "[surprised] パチンコで有り金溶かした人の顔してる！！"
     },
     {
       "speaker": "あかり",
-      "text": "[excited] あああ…！あかりさん…！？"
+      "text": " [sad] … して？"
     },
     {
       "speaker": "ななし",
-      "text": "[cheerful] 今度打ってみても…いいかも！"
-    },
-    {
-      "speaker": "ナレーター",
-      "text": "パチンコで有り金溶かした人の顔をしてる…"
-    },
-    {
-      "speaker": "ナレーター",
-      "text": "[pause]"
-    },
-    {
-      "speaker": "ななし",
-      "text": "[pause]"
-    },
-    {
-      "speaker": "ななし",
-      "text": "[pause]"
-    },
-    {
-      "speaker": "ななし",
-      "text": "して"
-    },
-    {
-      "speaker": "ななし",
-      "text": "でも友達同士でお金を貸すのは...... [hesitant]"
+      "text": "[慌てて] でも友達同士でお金を貸すのは...."
     },
     {
       "speaker": "あかり",
-      "text": "[loud] お金貸してい～から！"
+      "text": "[loud] お金貸して！一万でいいから！"
     },
     {
       "speaker": "ななし",
-      "text": "もっとお金の掛からない楽しい趣味を探した方がいいよ"
+      "text": "[calm] [warm] もっとお金の掛からない楽しい趣味を探した方がいいよ"
+    },
+    {
+      "speaker": "ななし",
+      "text": "[stammers] ダメだコイツ...早くなんとかしないと..."
     },
     {
       "speaker": "あかり",
-      "text": "[stammers] 駅だこういう...... なんとかしないと....."
-    },
-    {
-      "speaker": "ナレーター",
-      "text": "[cheerful] パチンコ以上に楽しい趣味って、なんですか？"
+      "text": "[cheerful] [cheerful] パチンコ以上に楽しい趣味って、なんですかぁ？？"
     },
     {
       "speaker": "ななし",
-      "text": "[gasps] 駅自だ...... なんとかしないと....."
+      "text": "[慌てて] あかりちゃん！"
     },
     {
       "speaker": "ナレーター",
