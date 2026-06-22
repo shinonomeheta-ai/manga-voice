@@ -358,11 +358,18 @@ def _all_audio_zip() -> bytes:
         files.append(("00_all.mp3", st.session_state["audio_all"]))
     if not files:
         return b""
+    # 音声が変わっていなければ作り直さない(毎回の再実行で再ZIP化しない)
+    sig = tuple((n, len(d)) for n, d in files)
+    if st.session_state.get("_zip_sig") == sig and "_zip_cache" in st.session_state:
+        return st.session_state["_zip_cache"]
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for n, d in files:
             z.writestr(n, d)
-    return buf.getvalue()
+    out = buf.getvalue()
+    st.session_state["_zip_sig"] = sig
+    st.session_state["_zip_cache"] = out
+    return out
 
 
 def _gen_all_blocks(settings: Settings, chars: dict) -> int:
@@ -715,6 +722,7 @@ def main() -> None:
                             disabled=gh_store is None):
                 try:
                     nm = _save_project_to_cloud()
+                    st.session_state.pop("gh_names", None)  # 一覧キャッシュを無効化
                     st.session_state["_flash"] = f"「{nm}」を保存しました。"
                     st.rerun()
                 except Exception as e:  # noqa: BLE001
@@ -724,13 +732,20 @@ def main() -> None:
             if gh_store is None:
                 st.caption("※ Secrets に GITHUB_TOKEN（Contents 読み書き）を追加すると保存できます")
             else:
-                try:
-                    names = gh_store.list_projects()
-                except Exception as e:  # noqa: BLE001
-                    names = []
-                    st.error(f"一覧の取得に失敗: {e}")
+                # 一覧はキャッシュ(毎回の通信を避ける)。保存/削除時のみ再取得。
+                if "gh_names" not in st.session_state:
+                    try:
+                        st.session_state["gh_names"] = gh_store.list_projects()
+                    except Exception as e:  # noqa: BLE001
+                        st.session_state["gh_names"] = []
+                        st.error(f"一覧の取得に失敗: {e}")
+                names = st.session_state["gh_names"]
+                hc = st.columns([4, 1])
+                hc[0].caption(f"プロジェクト一覧（{len(names)}件・クリックで開く）")
+                if hc[1].button("🔄", key="gh_refresh", help="一覧を更新"):
+                    st.session_state.pop("gh_names", None)
+                    st.rerun()
                 if names:
-                    st.caption("プロジェクト一覧（クリックで開く）")
                     for i, nm in enumerate(names):
                         c1, c2 = st.columns([5, 1])
                         if c1.button(f"📄 {nm}", use_container_width=True, key=f"gh_open_{i}"):
@@ -745,6 +760,7 @@ def main() -> None:
                         if c2.button("🗑", key=f"gh_del_{i}", help=f"{nm} を削除"):
                             try:
                                 gh_store.delete_project(nm)
+                                st.session_state.pop("gh_names", None)  # 一覧キャッシュ無効化
                                 st.session_state["_flash"] = f"「{nm}」を削除しました。"
                                 st.rerun()
                             except Exception as e:  # noqa: BLE001
@@ -789,6 +805,7 @@ def main() -> None:
                  disabled=gh_store is None, help="プロジェクトをクラウドに保存"):
         try:
             nm = _save_project_to_cloud()
+            st.session_state.pop("gh_names", None)  # 一覧キャッシュを無効化
             st.session_state["_flash_main"] = f"「{nm}」を保存しました。"
             st.rerun()
         except Exception as e:  # noqa: BLE001
