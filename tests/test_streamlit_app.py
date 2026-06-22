@@ -112,6 +112,19 @@ def test_project_save_zip_load_roundtrip():
     assert state["chartone_sel_太郎"] == "うれしい"  # [happy] のラベル
 
 
+def test_match_speaker_tolerates_honorifics():
+    """キャラシートの「あかりちゃん」をキャスト「あかり」にゆるく一致させる。"""
+    import importlib
+
+    app = importlib.import_module("streamlit_app")
+    names = ["あかり", "ななし", "桐原"]
+    assert app._match_speaker("あかりちゃん", names) == "あかり"
+    assert app._match_speaker("ななし", names) == "ななし"
+    assert app._match_speaker("桐原さん", names) == "桐原"
+    # 全く未知の名前は先頭にフォールバック(selectboxの選択肢に収めるため)
+    assert app._match_speaker("謎の人物", names) == "あかり"
+
+
 def test_analyze_images_batches_and_merges(monkeypatch):
     """画像が多いと batch 枚ずつに分割して解析し、結果を1本に結合する(413回避)。"""
     import importlib

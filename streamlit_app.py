@@ -226,13 +226,35 @@ def _analyze_images(settings: Settings, items: list[tuple[str, bytes]], batch: i
     return combined if combined is not None else Script(language=book.language)
 
 
+_HONORIFICS = ("ちゃん", "くん", "君", "さん", "様", "先生")
+
+
+def _norm_name(s: str) -> str:
+    """話者名の照合用に末尾の敬称/呼称を落として正規化(あかりちゃん→あかり)。"""
+    s = (s or "").strip()
+    for h in _HONORIFICS:
+        if s.endswith(h) and len(s) > len(h):
+            return s[: -len(h)]
+    return s
+
+
+def _match_speaker(name: str, char_names: list[str]) -> str:
+    """Claudeが返した話者名を、キャスト名にゆるく一致させる(敬称差を吸収)。"""
+    if name in char_names:
+        return name
+    target = _norm_name(name)
+    for c in char_names:  # あかりちゃん↔あかり 等を一致させる
+        if c == target or _norm_name(c) == target or _norm_name(c) == name:
+            return c
+    return char_names[0] if char_names else name
+
+
 def _lines_of(script, char_names: list[str]) -> list[tuple[str, str]]:
     out = []
     for scene in script.scenes:
         for line in scene.lines:
-            spk = line.speaker if line.speaker in char_names else (
-                char_names[0] if char_names else line.speaker)
-            out.append((spk, line.resolved_tts_text()))
+            out.append((_match_speaker(line.speaker, char_names),
+                        line.resolved_tts_text()))
     return out
 
 
