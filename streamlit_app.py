@@ -41,7 +41,7 @@ from src import tts as tts_mod
 from src.config import DEFAULT_OUTPUT_FORMAT, CharacterBook, Settings
 from src.models import Character
 
-st.set_page_config(page_title="ボイス生成（共有版）", page_icon="🎙️", layout="wide")
+st.set_page_config(page_title="ボイス生成", page_icon="🎙️", layout="wide")
 
 # 画像/Notion の文字起こし(Claude Vision)に使うモデル。感情つき書き起こしには
 # Haiku で十分で、Opus の数分の1のコストで済む。APIキーは共有のまま、TTS など
@@ -304,12 +304,64 @@ def _settings_to_state(s: dict) -> dict:
 
 
 def _restore_project(data: dict) -> None:
-    """読み込んだプロジェクトdictをセッションへ復元(台本/設定/キャスト)。"""
+    """読み込んだプロジェクトdictをセッションへ復元(台本/設定/キャスト/名前)。"""
     _set_blocks([(b.get("speaker", ""), b.get("text", ""))
                  for b in data.get("blocks", [])])
     st.session_state["_pending_settings"] = _settings_to_state(data.get("settings", {}))
     if data.get("characters"):  # キャスト(キャラ→ID)も復元
         st.session_state["_pending_cast"] = data["characters"]
+    st.session_state["_pending_name"] = data.get("name", "")  # ウィジェット前に適用
+
+
+def _all_audio_zip() -> bytes:
+    """生成済みの各ブロック音声(ナチュラル/ウォーム)＋つなげた音声をZIPで返す。"""
+    files: list[tuple[str, bytes]] = []
+    for pos, bid in enumerate(st.session_state.get("block_ids", [])):
+        spk = (st.session_state.get(f"spk_{bid}", "") or "blk").strip() or "blk"
+        safe = re.sub(r"[^0-9A-Za-z぀-ヿ一-鿿_-]+", "_", spk)[:16]
+        if st.session_state.get(f"audioN_{bid}"):
+            files.append((f"{pos+1:02d}_{safe}_natural.mp3", st.session_state[f"audioN_{bid}"]))
+        if st.session_state.get(f"audioW_{bid}"):
+            files.append((f"{pos+1:02d}_{safe}_warm.mp3", st.session_state[f"audioW_{bid}"]))
+    if st.session_state.get("audio_all"):
+        files.append(("00_all.mp3", st.session_state["audio_all"]))
+    if not files:
+        return b""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for n, d in files:
+            z.writestr(n, d)
+    return buf.getvalue()
+
+
+def _gen_all_blocks(settings: Settings, chars: dict) -> int:
+    """全ブロックを1つずつ生成(各ブロックに音声を入れる)。生成できた件数を返す。"""
+    ids = list(st.session_state.get("block_ids", []))
+    prog = st.progress(0, text="全ブロックを生成中…")
+    ok = 0
+    try:
+        for idx, bid in enumerate(ids):
+            spk = (st.session_state.get(f"spk_{bid}", "") or "").strip()
+            txt = (st.session_state.get(f"txt_{bid}", "") or "").strip()
+            vid = chars[spk].voice_id if spk in chars else spk
+            if not txt or not vid:
+                continue
+            prog.progress(int(idx / max(1, len(ids)) * 100),
+                          text=f"🎙️ {idx+1}/{len(ids)}：{spk or '—'}")
+            stab = chars[spk].stability if spk in chars else "natural"
+            raw = tts_mod.synthesize_one(settings, _effective_text(spk, txt), vid, stab,
+                                         None, DEFAULT_OUTPUT_FORMAT)
+            st.session_state[f"raw_{bid}"] = raw
+            st.session_state[f"audioN_{bid}"] = _postprocess(raw, "natural")
+            st.session_state[f"audioW_{bid}"] = _postprocess(raw, "warm")
+            _add_history(f"{spk}「{txt[:16]}」", st.session_state[f"audioN_{bid}"])
+            ok += 1
+        prog.progress(100, text="✅ 完了")
+    except Exception as e:  # noqa: BLE001
+        st.error(f"生成に失敗（{ok+1}番目あたり）: {e}")
+    finally:
+        prog.empty()
+    return ok
 
 
 def _set_blocks(pairs: list[tuple[str, str]]) -> None:
@@ -357,6 +409,15 @@ def main() -> None:
     if pend_cast is not None:
         st.session_state["cast"] = pend_cast
         st.session_state["cast_ver"] = st.session_state.get("cast_ver", 0) + 1
+    if "_pending_name" in st.session_state:
+        st.session_state["proj_name"] = st.session_state.pop("_pending_name")
+    if st.session_state.pop("_new_project", False):  # 新規: 台本/音声/名前をクリア
+        for k in [k for k in list(st.session_state.keys())
+                  if str(k).startswith(("audio", "raw", "spk_", "txt_"))]:
+            del st.session_state[k]
+        st.session_state["block_ids"] = [0]
+        st.session_state["block_seq"] = 1
+        st.session_state["proj_name"] = ""
 
     api_key = _secret("ELEVENLABS_API_KEY")
     if not api_key:
@@ -378,6 +439,27 @@ def main() -> None:
                           stability=d.get("stability", "natural"))
              for n, d in cast.items() if (d.get("voice_id") or "").strip()}
     char_names = list(chars.keys())
+
+    # GitHub保存(プロジェクトの保存先)。トークン未設定なら None。
+    gh_store = None
+    if _secret("GITHUB_TOKEN"):
+        from src import store_github as gh_mod
+        gh_store = gh_mod.GitHubStore(
+            _secret("GITHUB_TOKEN"), _secret("GITHUB_REPO", "shinonomeheta-ai/manga-voice"))
+
+    def _save_project_to_cloud() -> str:
+        """現在の台本＋設定＋キャストをプロジェクト名でクラウド保存し、名前を返す。"""
+        pset = {
+            "preset": st.session_state.get("preset", "natural"),
+            "speed": float(st.session_state.get("speed", 1.0) or 1.0),
+            "do_fx": bool(st.session_state.get("do_fx", True)),
+            "char_tone": {n: st.session_state.get(f"chartone_{n}", "")
+                          for n in char_names if st.session_state.get(f"chartone_{n}", "")},
+        }
+        p = _build_project(st.session_state.get("proj_name", ""), _project_pairs(), pset, cast)
+        with st.spinner("クラウドに保存中…"):
+            gh_store.save_project(p["name"], p)
+        return p["name"]
 
     if "block_ids" not in st.session_state:
         st.session_state.block_ids = [0]
@@ -547,45 +629,39 @@ def main() -> None:
 
         with tab_proj:
             st.markdown("**📂 プロジェクト**")
-            if st.session_state.get("_flash"):  # 直前の保存/読込の結果(rerunで消えないよう保持)
+            if st.session_state.get("_flash"):  # 直前の保存/開く/削除の結果(rerunで保持)
                 st.success(st.session_state.pop("_flash"))
-            proj_name = st.text_input("プロジェクト名", key="proj_name",
-                                      placeholder="例: ななしちゃん第1話")
-            proj_settings = {
-                "preset": st.session_state.get("preset", "natural"),
-                "speed": float(st.session_state.get("speed", 1.0) or 1.0),
-                "do_fx": bool(st.session_state.get("do_fx", True)),
-                "char_tone": {n: st.session_state.get(f"chartone_{n}", "")
-                              for n in char_names if st.session_state.get(f"chartone_{n}", "")},
-            }
-            proj = _build_project(proj_name, _project_pairs(), proj_settings, cast)
-            fbase = re.sub(r"[^0-9A-Za-z぀-ヿ一-鿿_-]+", "_", proj["name"])[:40] or "project"
+            st.text_input("プロジェクト名", key="proj_name", placeholder="無題プロジェクト")
+            pc = st.columns(2)
+            if pc[0].button("➕ 新規", use_container_width=True, key="proj_new"):
+                st.session_state["_new_project"] = True
+                st.rerun()
+            if pc[1].button("💾 保存", use_container_width=True, key="proj_save_left",
+                            disabled=gh_store is None):
+                try:
+                    nm = _save_project_to_cloud()
+                    st.session_state["_flash"] = f"「{nm}」を保存しました。"
+                    st.rerun()
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"保存に失敗: {e}")
 
-            gh_token = _secret("GITHUB_TOKEN")
-            gh_repo = _secret("GITHUB_REPO", "shinonomeheta-ai/manga-voice")
-            store = None
-            if gh_token:
-                from src import store_github as gh_mod
-                store = gh_mod.GitHubStore(gh_token, gh_repo)
-
-            # --- ☁️ クラウドのプロジェクトを開く/保存（ソリューション風） ---
-            st.caption("☁️ クラウド（GitHub）— 別端末・友達と共有")
-            if store is None:
-                st.caption("※ Secrets に GITHUB_TOKEN（Contents 読み書き）を追加すると有効")
+            st.divider()
+            if gh_store is None:
+                st.caption("※ Secrets に GITHUB_TOKEN（Contents 読み書き）を追加すると保存できます")
             else:
                 try:
-                    names = store.list_projects()
+                    names = gh_store.list_projects()
                 except Exception as e:  # noqa: BLE001
                     names = []
                     st.error(f"一覧の取得に失敗: {e}")
                 if names:
-                    st.caption(f"保存済みプロジェクト（{len(names)}件） — クリックで開く")
+                    st.caption("プロジェクト一覧（クリックで開く）")
                     for i, nm in enumerate(names):
                         c1, c2 = st.columns([5, 1])
-                        if c1.button(f"📂 {nm}", use_container_width=True, key=f"gh_open_{i}"):
+                        if c1.button(f"📄 {nm}", use_container_width=True, key=f"gh_open_{i}"):
                             try:
-                                with st.spinner("GitHubから読み込み中…"):
-                                    data = store.load_project(nm)
+                                with st.spinner("読み込み中…"):
+                                    data = gh_store.load_project(nm)
                                 _restore_project(data)
                                 st.session_state["_flash"] = f"「{data.get('name', nm)}」を開きました。"
                                 st.rerun()
@@ -593,63 +669,13 @@ def main() -> None:
                                 st.error(f"読み込みに失敗: {e}")
                         if c2.button("🗑", key=f"gh_del_{i}", help=f"{nm} を削除"):
                             try:
-                                store.delete_project(nm)
+                                gh_store.delete_project(nm)
                                 st.session_state["_flash"] = f"「{nm}」を削除しました。"
                                 st.rerun()
                             except Exception as e:  # noqa: BLE001
                                 st.error(f"削除に失敗: {e}")
                 else:
-                    st.caption("（まだクラウドに保存がありません）")
-                if st.button("💾 このプロジェクトをクラウドに保存", use_container_width=True,
-                             key="gh_save", disabled=not proj["blocks"]):
-                    try:
-                        with st.spinner("GitHubに保存中…"):
-                            store.save_project(proj["name"], proj)
-                        st.session_state["_flash"] = (
-                            f"クラウドに保存しました（{proj['name']}）。"
-                            "上の一覧に表示されます。")
-                        st.rerun()
-                    except Exception as e:  # noqa: BLE001
-                        st.error(f"クラウド保存に失敗: {e}")
-
-            # --- ローカル（ファイル）で保存/読み込み ---
-            st.divider()
-            st.caption("ローカル（ファイル）に保存・読み込み")
-            # 音声込みZIP: 生成済みの全部つなげ音声＋各ブロックの2版をまとめる
-            audio_files: list[tuple[str, bytes]] = []
-            if st.session_state.get("audio_all"):
-                audio_files.append(("audio_all.mp3", st.session_state["audio_all"]))
-            for pos, b in enumerate(st.session_state.block_ids):
-                spk = (st.session_state.get(f"spk_{b}", "") or "blk").strip() or "blk"
-                safe = re.sub(r"[^0-9A-Za-z぀-ヿ一-鿿_-]+", "_", spk)[:16]
-                if st.session_state.get(f"audioN_{b}"):
-                    audio_files.append((f"{pos+1:02d}_{safe}_natural.mp3",
-                                        st.session_state[f"audioN_{b}"]))
-                if st.session_state.get(f"audioW_{b}"):
-                    audio_files.append((f"{pos+1:02d}_{safe}_warm.mp3",
-                                        st.session_state[f"audioW_{b}"]))
-            d1, d2 = st.columns(2)
-            d1.download_button("⬇️ JSON", json.dumps(proj, ensure_ascii=False, indent=2),
-                               file_name=f"{fbase}.json", mime="application/json",
-                               use_container_width=True, key="proj_dl")
-            d2.download_button("⬇️ 音声込みZIP",
-                               _project_zip(proj, audio_files) if audio_files else b"",
-                               file_name=f"{fbase}.zip", mime="application/zip",
-                               use_container_width=True, key="proj_zip",
-                               disabled=not audio_files,
-                               help="生成済みの音声(全部つなげ＋各ブロック2版)と台本をまとめます")
-            if not audio_files:
-                st.caption("※ 音声を生成するとZIP保存が有効になります")
-            upj = st.file_uploader("📂 ファイルから開く（JSON / ZIP）", type=["json", "zip"],
-                                   key="proj_up")
-            if upj is not None and st.button("読み込む", use_container_width=True, key="proj_load"):
-                try:
-                    data = _parse_project(upj.name, upj.getvalue())
-                    _restore_project(data)
-                    st.success(f"「{data.get('name', 'project')}」を読み込みました。")
-                    st.rerun()
-                except Exception as e:  # noqa: BLE001
-                    st.error(f"読み込み失敗: {e}")
+                    st.caption("（まだプロジェクトがありません）")
 
     # ===== 全ブロックを収集(出力バー用) =====
     lines: list[dict[str, str]] = []
@@ -667,41 +693,70 @@ def main() -> None:
         stabs.append(chars[spk].stability if spk in chars else "natural")
         total += len(txt)
 
-    # ===== メイン: 出力バー + 台本(全幅) =====
-    st.title("🎙️ ボイス生成（共有版）")
-    over = total > max_chars
-    if st.button("🔊 全部つなげて生成", type="primary",
-                 disabled=not lines or over, use_container_width=True):
-        prog = st.progress(0, text="生成の準備中…")
-        stage = "準備"
+    # ===== メイン: タイトル(プロジェクト名) + 操作 + 台本 =====
+    pname = (st.session_state.get("proj_name", "") or "").strip()
+    st.title(f"🎙️ {pname or '無題プロジェクト'}")
+    fbase = re.sub(r"[^0-9A-Za-z぀-ヿ一-鿿_-]+", "_", pname)[:40] or "project"
+    if st.session_state.get("_flash_main"):
+        st.success(st.session_state.pop("_flash_main"))
+
+    b1, b2, b3 = st.columns([2, 1, 1])
+    gen_all = b1.button("🔊 全ブロックを生成", type="primary",
+                        disabled=not lines, use_container_width=True,
+                        help="各ブロックを1つずつ生成し、ブロックごとに確認できます")
+    zipbytes = _all_audio_zip()
+    b2.download_button("⬇️ 一括DL", zipbytes if zipbytes else b"",
+                       file_name=f"{fbase}_audio.zip", mime="application/zip",
+                       use_container_width=True, key="dl_zip_main", disabled=not zipbytes,
+                       help="生成済みの音声をまとめてダウンロード")
+    if b3.button("💾 保存", use_container_width=True, key="proj_save_right",
+                 disabled=gh_store is None, help="プロジェクトをクラウドに保存"):
         try:
-            stage = "音声生成（ElevenLabs）"
-            prog.progress(30, text=f"🎙️ {stage}…（{len(lines)}行）")
-            if len(lines) == 1:
-                audio = tts_mod.synthesize_one(
-                    settings, lines[0]["text"], lines[0]["voice_id"],
-                    stabs[0], None, DEFAULT_OUTPUT_FORMAT)
-            else:
-                audio = tts_mod.synthesize_dialogue_bytes(settings, lines, DEFAULT_OUTPUT_FORMAT)
-            st.session_state["raw_all"] = audio  # 再適用用に素の声を保持
-            stage = "整音"
-            prog.progress(75, text=f"🎚️ {stage}…")
-            preset = st.session_state.get("preset", "natural")
-            do_fx = st.session_state.get("do_fx", True)
-            st.session_state["audio_all"] = _postprocess(audio, preset if do_fx else None)
-            _add_history(f"掛け合い {len(lines)}行", st.session_state["audio_all"])
-            prog.progress(100, text="✅ 完了")
+            nm = _save_project_to_cloud()
+            st.session_state["_flash_main"] = f"「{nm}」を保存しました。"
+            st.rerun()
         except Exception as e:  # noqa: BLE001
-            st.session_state.pop("audio_all", None)
-            st.error(f"生成に失敗しました（{stage}）: {e}")
-        finally:
-            prog.empty()
-    if over:
-        st.warning("文字数が上限を超えています。減らしてください。")
-    if st.session_state.get("audio_all"):
-        st.audio(st.session_state["audio_all"], format="audio/mp3")
-        st.download_button("⬇️ まとめてDL", st.session_state["audio_all"],
-                           file_name="story.mp3", mime="audio/mp3", key="dl_all")
+            st.error(f"保存に失敗: {e}")
+    if gen_all:
+        n = _gen_all_blocks(settings, chars)
+        st.session_state["_flash_main"] = f"{n} ブロックを生成しました。"
+        st.rerun()
+
+    # つなげて1本に(任意・掛け合いを1ファイルに)
+    with st.expander("🔗 つなげて1本に生成（任意）"):
+        over = total > max_chars
+        if over:
+            st.warning("文字数が上限を超えています。減らすか「全ブロックを生成」をご利用ください。")
+        if st.button("🔗 つなげて生成", disabled=not lines or over,
+                     use_container_width=True, key="gen_concat"):
+            prog = st.progress(0, text="生成準備中…")
+            stage = "準備"
+            try:
+                stage = "音声生成（ElevenLabs）"
+                prog.progress(30, text=f"🎙️ {stage}…（{len(lines)}行）")
+                if len(lines) == 1:
+                    audio = tts_mod.synthesize_one(
+                        settings, lines[0]["text"], lines[0]["voice_id"],
+                        stabs[0], None, DEFAULT_OUTPUT_FORMAT)
+                else:
+                    audio = tts_mod.synthesize_dialogue_bytes(settings, lines, DEFAULT_OUTPUT_FORMAT)
+                st.session_state["raw_all"] = audio
+                stage = "整音"
+                prog.progress(75, text=f"🎚️ {stage}…")
+                preset = st.session_state.get("preset", "natural")
+                do_fx = st.session_state.get("do_fx", True)
+                st.session_state["audio_all"] = _postprocess(audio, preset if do_fx else None)
+                _add_history(f"つなげて {len(lines)}行", st.session_state["audio_all"])
+                prog.progress(100, text="✅ 完了")
+            except Exception as e:  # noqa: BLE001
+                st.session_state.pop("audio_all", None)
+                st.error(f"生成に失敗しました（{stage}）: {e}")
+            finally:
+                prog.empty()
+        if st.session_state.get("audio_all"):
+            st.audio(st.session_state["audio_all"], format="audio/mp3")
+            st.download_button("⬇️ つなげた音声をDL", st.session_state["audio_all"],
+                               file_name=f"{fbase}.mp3", mime="audio/mp3", key="dl_all")
 
     st.divider()
 
