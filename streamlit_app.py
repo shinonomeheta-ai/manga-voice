@@ -383,9 +383,25 @@ def main() -> None:
         st.session_state.block_ids = [0]
         st.session_state.block_seq = 1
 
-    # サイドバーを少し広げる
+    # レイアウト: PCはサイドバー広め、スマホは折り返してタップしやすく
     st.markdown(
-        "<style>section[data-testid='stSidebar']{width:440px !important;}</style>",
+        """
+        <style>
+        /* PC(広い画面)のみサイドバーを広げる。スマホは既定のオーバーレイに任せる */
+        @media (min-width: 900px){
+          section[data-testid='stSidebar']{ width:440px !important; }
+        }
+        /* スマホ: 横並び(番号/話者/アイコン列など)を折り返して押しやすく */
+        @media (max-width: 640px){
+          div[data-testid='stHorizontalBlock']{ flex-wrap: wrap !important; }
+          div[data-testid='stHorizontalBlock'] > div[data-testid='stColumn']{
+            min-width: 44px !important;
+          }
+          .block-container{ padding: 0.6rem 0.6rem 4rem !important; }
+          .stButton button{ min-height: 2.6rem; }  /* タップ領域を確保 */
+        }
+        </style>
+        """,
         unsafe_allow_html=True)
 
     # ===== 左サイドバー: タブ(取り込み / 設定 / 感情 / 履歴 / プロジェクト) =====
