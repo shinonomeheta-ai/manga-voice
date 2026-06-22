@@ -397,6 +397,75 @@ def _transcribe_into_block(settings: Settings, items, char_names: list[str], bid
     _set_blocks(snap[:pos] + new + snap[pos + 1:])
 
 
+@st.dialog("📥 取り込み")
+def _import_dialog(settings: Settings, char_names: list[str]) -> None:
+    """画像/Notion から文字起こしして台本に反映するモーダル(＋ボタンから開く)。"""
+    st.caption("画像 / Notion から感情付きで文字起こしして台本に反映します")
+    if not settings.anthropic_api_key:
+        st.info("Secrets に ANTHROPIC_API_KEY（Claude）を追加すると使えます。")
+    t_img, t_notion = st.tabs(["🖼 画像", "🔗 Notion"])
+
+    with t_img:
+        if paste_image_button is not None:
+            res = paste_image_button("📋 画像を貼り付け", key="dlg_paste")
+            if getattr(res, "image_data", None) is not None:
+                buf = io.BytesIO()
+                res.image_data.save(buf, format="PNG")
+                st.session_state["pasted_img"] = buf.getvalue()
+        if st.session_state.get("pasted_img"):
+            st.image(st.session_state["pasted_img"], use_container_width=True)
+            if st.button("貼り付けを取り消し", key="dlg_clear_paste", use_container_width=True):
+                st.session_state.pop("pasted_img", None)
+                st.rerun()
+        ups = st.file_uploader("画像（D&D／複数可）", type=["png", "jpg", "jpeg", "webp"],
+                               accept_multiple_files=True, key="dlg_imgs")
+        items = [(Path(f.name).suffix or ".png", f.getvalue()) for f in (ups or [])]
+        if st.session_state.get("pasted_img"):
+            items.append((".png", st.session_state["pasted_img"]))
+        if st.button("文字起こし→台本に反映", use_container_width=True, key="dlg_tr_img",
+                     disabled=not (settings.anthropic_api_key and items)):
+            prog = st.progress(0, text="準備中…")
+            try:
+                prog.progress(40, text=f"🧠 Claude解析…（画像{len(items)}枚 / Haiku）")
+                _transcribe_images(settings, items, char_names)
+                prog.progress(100, text="✅ 完了")
+                st.session_state.pop("pasted_img", None)
+                st.session_state["_flash_main"] = "画像から台本に反映しました。"
+                st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"文字起こしに失敗しました（Claude解析）: {e}")
+            finally:
+                prog.empty()
+
+    with t_notion:
+        notion_token = _secret("NOTION_TOKEN")
+        if not notion_token:
+            st.caption("※ Secrets に NOTION_TOKEN を追加すると有効")
+        url = st.text_input("Notion ページ URL / ID", key="dlg_notion_url")
+        if st.button("Notionから取り込み→台本に反映", use_container_width=True, key="dlg_tr_notion",
+                     disabled=not (settings.anthropic_api_key and notion_token and url)):
+            prog = st.progress(0, text="準備中…")
+            stage = "Notion取得"
+            try:
+                prog.progress(30, text="📥 Notionから画像を取得中…")
+                n_items = notion_mod.fetch_page_image_items(notion_token, url)
+                if not n_items:
+                    prog.empty()
+                    st.warning("ページに画像が見つかりませんでした"
+                               "（画像ブロックが無い／DB・子ページは対象外／未共有の可能性）。")
+                else:
+                    stage = "Claude解析"
+                    prog.progress(65, text=f"🧠 Claude解析…（画像{len(n_items)}枚 / Haiku）")
+                    _transcribe_images(settings, n_items, char_names)
+                    prog.progress(100, text="✅ 完了")
+                    st.session_state["_flash_main"] = f"Notionから{len(n_items)}枚を取り込みました。"
+                    st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Notion取り込みに失敗しました（{stage}）: {e}")
+            finally:
+                prog.empty()
+
+
 def main() -> None:
     if not _check_password():
         st.stop()
@@ -488,78 +557,8 @@ def main() -> None:
 
     # ===== 左サイドバー: タブ(取り込み / 設定 / 感情 / 履歴 / プロジェクト) =====
     with st.sidebar:
-        tab_proj, tab_in, tab_cfg, tab_cast, tab_hist = st.tabs(
-            ["💾 プロジェクト", "📥 取り込み", "⚙️ 設定", "🎭 キャラ・感情", "🕘 履歴"])
-
-        with tab_in:
-            st.caption("画像から感情付きで文字起こし")
-            if not settings.anthropic_api_key:
-                st.info("Secrets に ANTHROPIC_API_KEY（Claude）を追加すると使えます。")
-            if paste_image_button is not None:
-                res = paste_image_button("📋 画像を貼り付け", key="paste_btn")
-                if getattr(res, "image_data", None) is not None:
-                    buf = io.BytesIO()
-                    res.image_data.save(buf, format="PNG")
-                    st.session_state["pasted_img"] = buf.getvalue()
-            else:
-                st.caption("※ 貼り付け未導入（streamlit-paste-button）")
-            if st.session_state.get("pasted_img"):
-                st.image(st.session_state["pasted_img"], use_container_width=True, caption="貼り付け画像")
-                if st.button("貼り付けを取り消し", key="clear_paste", use_container_width=True):
-                    st.session_state.pop("pasted_img", None)
-                    st.rerun()
-            ups = st.file_uploader("またはD&D／ファイル選択（複数可）",
-                                   type=["png", "jpg", "jpeg", "webp"],
-                                   accept_multiple_files=True, key="tr_imgs")
-            items: list[tuple[str, bytes]] = []
-            for f in ups or []:
-                items.append((Path(f.name).suffix or ".png", f.getvalue()))
-            if st.session_state.get("pasted_img"):
-                items.append((".png", st.session_state["pasted_img"]))
-            if st.button("文字起こし→台本に反映", use_container_width=True,
-                         disabled=not (settings.anthropic_api_key and items)):
-                prog = st.progress(0, text="準備中…")
-                try:
-                    prog.progress(40, text=f"🧠 Claude解析…（画像{len(items)}枚 / Haiku）")
-                    _transcribe_images(settings, items, char_names)
-                    prog.progress(100, text="✅ 完了")
-                    st.session_state.pop("pasted_img", None)
-                    st.success("台本に反映しました。")
-                    st.rerun()
-                except Exception as e:  # noqa: BLE001
-                    st.error(f"文字起こしに失敗しました（Claude解析）: {e}")
-                finally:
-                    prog.empty()
-
-            # --- Notion ページ内の画像から取り込み ---
-            st.divider()
-            st.caption("Notionページ内の画像から取り込み")
-            notion_token = _secret("NOTION_TOKEN")
-            if not notion_token:
-                st.caption("※ Secrets に NOTION_TOKEN を追加すると有効")
-            notion_url = st.text_input("Notion ページ URL / ID", key="notion_url")
-            if st.button("Notionから取り込み→台本に反映", use_container_width=True,
-                         disabled=not (settings.anthropic_api_key and notion_token and notion_url)):
-                prog = st.progress(0, text="準備中…")
-                stage = "Notion取得"
-                try:
-                    prog.progress(30, text="📥 Notionから画像を取得中…")
-                    n_items = notion_mod.fetch_page_image_items(notion_token, notion_url)
-                    if not n_items:
-                        prog.empty()
-                        st.warning("ページに画像が見つかりませんでした"
-                                   "（画像ブロックが無い／DB・子ページの画像は対象外／ページ未共有の可能性）。")
-                    else:
-                        stage = "Claude解析"
-                        prog.progress(65, text=f"🧠 Claude解析…（画像{len(n_items)}枚 / Haiku）")
-                        _transcribe_images(settings, n_items, char_names)
-                        prog.progress(100, text="✅ 完了")
-                        st.success(f"{len(n_items)}枚を取り込み→台本に反映しました。")
-                        st.rerun()
-                except Exception as e:  # noqa: BLE001
-                    st.error(f"Notion取り込みに失敗しました（{stage}）: {e}")
-                finally:
-                    prog.empty()
+        tab_proj, tab_cfg, tab_cast, tab_hist = st.tabs(
+            ["💾 プロジェクト", "⚙️ 設定", "🎭 キャラ・感情", "🕘 履歴"])
 
         with tab_cfg:
             st.selectbox("整音プリセット", list(fx_mod.PRESETS.keys()), index=0,
@@ -728,6 +727,10 @@ def main() -> None:
                 "「🎭 キャラ・感情」でキャラにボイスIDを割り当ててください。")
         st.rerun()
 
+    # 取り込み(画像/Notion)はモーダルで開く
+    if st.button("📥 取り込み（画像 / Notion）", use_container_width=True, key="open_import"):
+        _import_dialog(settings, char_names)
+
     # つなげて1本に(任意・掛け合いを1ファイルに)
     with st.expander("🔗 つなげて1本に生成（任意）"):
         over = total > max_chars
@@ -787,10 +790,11 @@ def main() -> None:
                 st.caption("（並べ替えコンポーネントが使えません。各ブロックで編集してください）")
 
     remove_id = None
+    move = None  # (bid, 方向): 並べ替え
     for i, bid in enumerate(st.session_state.block_ids):
         with st.container(border=True):
-            # 上段: 番号 + 話者(左寄せ) + アイコン操作(画像/感情タグ/生成/削除) + 余白
-            hdr = st.columns([1, 2, 1, 1, 1, 1, 4])
+            # 上段: 番号 + 話者 + アイコン操作(画像/感情/生成/削除/上下移動)
+            hdr = st.columns([1, 2, 1, 1, 1, 1, 1, 1, 2])
             hdr[0].markdown(f"### {i + 1}")
             if char_names:
                 hdr[1].selectbox("キャラ", char_names, key=f"spk_{bid}",
@@ -819,6 +823,10 @@ def main() -> None:
                 _gen_block(settings, chars, bid)
             if hdr[5].button("🗑", key=f"del_{bid}", use_container_width=True, help="削除"):
                 remove_id = bid
+            if hdr[6].button("⬆️", key=f"up_{bid}", use_container_width=True, help="上へ"):
+                move = (bid, -1)
+            if hdr[7].button("⬇️", key=f"down_{bid}", use_container_width=True, help="下へ"):
+                move = (bid, 1)
             # セリフ(全幅)
             st.text_area("セリフ", key=f"txt_{bid}", height=80,
                          label_visibility="collapsed", placeholder="セリフ…")
@@ -846,6 +854,16 @@ def main() -> None:
     if remove_id is not None and len(st.session_state.block_ids) > 1:
         st.session_state.block_ids = [b for b in st.session_state.block_ids if b != remove_id]
         st.rerun()
+
+    if move is not None:  # ⬆️⬇️ で隣と入れ替え
+        ids = list(st.session_state.block_ids)
+        bid, d = move
+        idx = ids.index(bid)
+        j = idx + d
+        if 0 <= j < len(ids):
+            ids[idx], ids[j] = ids[j], ids[idx]
+            st.session_state.block_ids = ids
+            st.rerun()
 
 
 main()
