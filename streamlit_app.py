@@ -702,7 +702,8 @@ def main() -> None:
 
     b1, b2, b3 = st.columns([2, 1, 1])
     gen_all = b1.button("🔊 全ブロックを生成", type="primary",
-                        disabled=not lines, use_container_width=True,
+                        disabled=not st.session_state.get("block_ids"),
+                        use_container_width=True,
                         help="各ブロックを1つずつ生成し、ブロックごとに確認できます")
     zipbytes = _all_audio_zip()
     b2.download_button("⬇️ 一括DL", zipbytes if zipbytes else b"",
@@ -719,7 +720,12 @@ def main() -> None:
             st.error(f"保存に失敗: {e}")
     if gen_all:
         n = _gen_all_blocks(settings, chars)
-        st.session_state["_flash_main"] = f"{n} ブロックを生成しました。"
+        if n:
+            st.session_state["_flash_main"] = f"{n} ブロックを生成しました。"
+        else:
+            st.session_state["_flash_main"] = (
+                "生成できるブロックがありません。セリフを入力し、"
+                "「🎭 キャラ・感情」でキャラにボイスIDを割り当ててください。")
         st.rerun()
 
     # つなげて1本に(任意・掛け合いを1ファイルに)
