@@ -446,10 +446,30 @@ def _transcribe_into_block(settings: Settings, items, char_names: list[str], bid
 @st.dialog("📥 取り込み")
 def _import_dialog(settings: Settings, char_names: list[str]) -> None:
     """画像/Notion から文字起こしして台本に反映するモーダル(＋ボタンから開く)。"""
-    st.caption("画像 / Notion から感情付きで文字起こしして台本に反映します")
+    st.caption("画像 / Notion / 台本(md) から台本に反映します")
     if not settings.anthropic_api_key:
-        st.info("Secrets に ANTHROPIC_API_KEY（Claude）を追加すると使えます。")
-    t_img, t_notion = st.tabs(["🖼 画像", "🔗 Notion"])
+        st.info("画像/Notionは Secrets に ANTHROPIC_API_KEY（Claude）が必要です。")
+    t_img, t_notion, t_md = st.tabs(["🖼 画像", "🔗 Notion", "📝 台本(md)"])
+
+    with t_md:
+        st.caption("シナリオ生成サイトの台本(ネームmd)を貼り付けて取り込みます")
+        md = st.text_area("台本(md)", key="dlg_md", height=200,
+                          placeholder="# 第NN話「…」\n## ページ別ネーム指示\n### P1（① ツカミ）\n- コマ1:【画】… ／【セリフ・あかり】「…」")
+        if st.button("台本(md)→反映", use_container_width=True, key="dlg_tr_md",
+                     disabled=not (md or "").strip()):
+            try:
+                from src.scenario_ingest import parse_neme
+                scenario, _ = parse_neme(md)
+                pairs = [(_match_speaker(ln["speaker"], char_names), ln["text"])
+                         for s in scenario["scenes"] for ln in s["lines"]]
+                if not pairs:
+                    st.warning("台本からセリフを抽出できませんでした。形式を確認してください。")
+                else:
+                    _set_blocks(pairs)
+                    st.session_state["_flash_main"] = f"台本から{len(pairs)}行を取り込みました。"
+                    st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"取り込みに失敗: {e}")
 
     with t_img:
         if paste_image_button is not None:
@@ -512,84 +532,6 @@ def _import_dialog(settings: Settings, char_names: list[str]) -> None:
                 prog.empty()
 
 
-def _scenario_view(settings: Settings, char_names: list[str]) -> None:
-    """スマホ前提のシナリオ生成画面: 資料＋チェックポイント→7パートのネーム台本。"""
-    from src import scenario_gen as sgen
-
-    st.title("📝 シナリオ生成")
-    st.caption("資料（実在事件）＋必ず入れたいシーンから、7パート構成の台本を作ります")
-    if not settings.anthropic_api_key:
-        st.info("管理者へ: Secrets に ANTHROPIC_API_KEY を追加すると使えます。")
-    if st.session_state.get("_flash_sc"):
-        st.success(st.session_state.pop("_flash_sc"))
-
-    st.markdown("**① 資料（実在事件のメモ）**")
-    mat_dir = sgen.DEFAULT_KIT / "資料"
-    picks = sorted(p.name for p in mat_dir.glob("*.md")) if mat_dir.exists() else []
-    if picks:
-        c = st.columns([3, 1])
-        pick = c[0].selectbox("資料から選ぶ", ["（手入力）"] + picks, key="sc_pick",
-                              label_visibility="collapsed")
-        if c[1].button("読み込む", use_container_width=True, key="sc_load",
-                       disabled=pick == "（手入力）"):
-            st.session_state["_pending_sc_material"] = (mat_dir / pick).read_text(
-                encoding="utf-8", errors="replace")
-            st.rerun()
-    st.text_area("資料テキスト", key="sc_material", height=160,
-                 label_visibility="collapsed",
-                 placeholder="実在事件のメモを貼り付け、または上の資料から読み込み")
-
-    st.markdown("**② 必ず入れるシーン（チェックポイント・1行に1つ）**")
-    st.text_area("チェックポイント", key="sc_checkpoints", height=100,
-                 label_visibility="collapsed",
-                 placeholder="例:\nあかりが大負けして「遠隔だ」と騒ぐ\n桐原が当時の新聞記事を出す")
-
-    material = (st.session_state.get("sc_material", "") or "").strip()
-    cps = [ln for ln in (st.session_state.get("sc_checkpoints", "") or "").splitlines()
-           if ln.strip()]
-    if st.button("📝 シナリオを生成", type="primary", use_container_width=True,
-                 disabled=not (settings.anthropic_api_key and material)):
-        prog = st.progress(0, text="準備中…")
-        try:
-            prog.progress(30, text="🧠 Claudeが7パート構成で執筆中…（数十秒〜数分）")
-            md = sgen.generate_neme(settings, material, cps)
-            st.session_state["sc_result"] = md
-            st.session_state["sc_ver"] = st.session_state.get("sc_ver", 0) + 1
-            st.session_state["_flash_sc"] = "シナリオを生成しました。下で確認・編集できます。"
-            prog.progress(100, text="✅ 完了")
-            st.rerun()
-        except Exception as e:  # noqa: BLE001
-            st.error(f"生成に失敗しました: {e}")
-        finally:
-            prog.empty()
-
-    md = st.session_state.get("sc_result", "")
-    if md:
-        st.divider()
-        st.markdown("**生成結果（編集できます）**")
-        ver = st.session_state.get("sc_ver", 0)
-        edited = st.text_area("台本(md)", value=md, key=f"sc_edit_{ver}", height=360,
-                              label_visibility="collapsed")
-        cc = st.columns(2)
-        cc[0].download_button("⬇️ md保存", edited, file_name="scenario.md",
-                              mime="text/markdown", use_container_width=True, key="sc_dl")
-        if cc[1].button("🎙️ この台本を音声化", use_container_width=True, key="sc_to_voice"):
-            try:
-                from src.scenario_ingest import parse_neme
-                scenario, _ = parse_neme(edited)
-                pairs = [(_match_speaker(ln["speaker"], char_names), ln["text"])
-                         for s in scenario["scenes"] for ln in s["lines"]]
-                if not pairs:
-                    st.warning("台本からセリフを抽出できませんでした。形式を確認してください。")
-                else:
-                    _set_blocks(pairs)
-                    st.session_state["_pending_mode"] = "🎙️ 音声生成"
-                    st.session_state["_flash_main"] = f"{len(pairs)}行を音声生成に取り込みました。"
-                    st.rerun()
-            except Exception as e:  # noqa: BLE001
-                st.error(f"取り込みに失敗: {e}")
-
-
 def main() -> None:
     if not _check_password():
         st.stop()
@@ -606,10 +548,6 @@ def main() -> None:
         st.session_state["cast_ver"] = st.session_state.get("cast_ver", 0) + 1
     if "_pending_name" in st.session_state:
         st.session_state["proj_name"] = st.session_state.pop("_pending_name")
-    if "_pending_mode" in st.session_state:  # シナリオ⇄音声 の切替(ウィジェット前)
-        st.session_state["mode"] = st.session_state.pop("_pending_mode")
-    if "_pending_sc_material" in st.session_state:  # 資料の読み込み
-        st.session_state["sc_material"] = st.session_state.pop("_pending_sc_material")
     if st.session_state.pop("_new_project", False):  # 新規: 台本/音声/名前をクリア
         for k in [k for k in list(st.session_state.keys())
                   if str(k).startswith(("audio", "raw", "spk_", "txt_"))]:
@@ -619,9 +557,12 @@ def main() -> None:
         st.session_state["proj_name"] = ""
         st.session_state["_flash_main"] = "新規プロジェクトを作成しました（台本をクリア）。"
 
-    # キーは用意できているものだけ載せる(シナリオ生成=ANTHROPIC, 音声=ELEVENLABS)。
+    api_key = _secret("ELEVENLABS_API_KEY")
+    if not api_key:
+        st.error("管理者へ: Secrets に ELEVENLABS_API_KEY を設定してください。")
+        st.stop()
     settings = Settings(anthropic_api_key=_secret("ANTHROPIC_API_KEY"),
-                        elevenlabs_api_key=_secret("ELEVENLABS_API_KEY"))
+                        elevenlabs_api_key=api_key)
     max_chars = int(_secret("MAX_CHARS", "800") or 800)
 
     # GitHub保存(プロジェクト/既定キャストの保存先)。トークン未設定なら None。
@@ -854,18 +795,6 @@ def main() -> None:
                                 st.error(f"削除に失敗: {e}")
                 else:
                     st.caption("（まだプロジェクトがありません）")
-
-    # ===== モード: シナリオ生成(既定) / 音声生成 =====
-    mode = st.radio("モード", ["📝 シナリオ生成", "🎙️ 音声生成"],
-                    horizontal=True, key="mode", label_visibility="collapsed")
-    if mode.startswith("📝"):
-        _scenario_view(settings, char_names)
-        return
-
-    # 音声モードは ElevenLabs キーが必要。
-    if not settings.elevenlabs_api_key:
-        st.error("管理者へ: Secrets に ELEVENLABS_API_KEY を設定してください（音声生成に必要）。")
-        st.stop()
 
     # ===== 全ブロックを収集(出力バー用) =====
     lines: list[dict[str, str]] = []
