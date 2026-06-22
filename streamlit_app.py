@@ -303,6 +303,15 @@ def _settings_to_state(s: dict) -> dict:
     return out
 
 
+def _restore_project(data: dict) -> None:
+    """読み込んだプロジェクトdictをセッションへ復元(台本/設定/キャスト)。"""
+    _set_blocks([(b.get("speaker", ""), b.get("text", ""))
+                 for b in data.get("blocks", [])])
+    st.session_state["_pending_settings"] = _settings_to_state(data.get("settings", {}))
+    if data.get("characters"):  # キャスト(キャラ→ID)も復元
+        st.session_state["_pending_cast"] = data["characters"]
+
+
 def _set_blocks(pairs: list[tuple[str, str]]) -> None:
     """(speaker, text) の並びでブロックを作り直す(idは0から振り直し)。"""
     for k in [k for k in list(st.session_state.keys())
@@ -376,13 +385,13 @@ def main() -> None:
 
     # サイドバーを少し広げる
     st.markdown(
-        "<style>section[data-testid='stSidebar']{width:360px !important;}</style>",
+        "<style>section[data-testid='stSidebar']{width:440px !important;}</style>",
         unsafe_allow_html=True)
 
     # ===== 左サイドバー: タブ(取り込み / 設定 / 感情 / 履歴 / プロジェクト) =====
     with st.sidebar:
-        tab_in, tab_cfg, tab_char, tab_cast, tab_hist, tab_proj = st.tabs(
-            ["📥 取り込み", "⚙️ 設定", "🎭 感情", "🎚 キャラ", "🕘 履歴", "💾 プロジェクト"])
+        tab_in, tab_cfg, tab_cast, tab_hist, tab_proj = st.tabs(
+            ["📥 取り込み", "⚙️ 設定", "🎭 キャラ・感情", "🕘 履歴", "💾 プロジェクト"])
 
         with tab_in:
             st.caption("画像から感情付きで文字起こし")
@@ -467,18 +476,8 @@ def main() -> None:
                 st.rerun()
             st.caption("モデル: eleven_v3 固定")
 
-        with tab_char:
-            st.caption("キャラの基本トーン（タグが無いセリフに自動付与）")
-            label_to_tag = {lab: tag for lab, tag in TAG_CHOICES}
-            tone_opts = ["なし"] + [lab for lab, _ in TAG_CHOICES]
-            for name in char_names:
-                sel = st.selectbox(name, tone_opts, key=f"chartone_sel_{name}")
-                st.session_state[f"chartone_{name}"] = (
-                    "" if sel == "なし" else label_to_tag.get(sel, ""))
-            if not char_names:
-                st.caption("（割当済みキャラがありません）")
-
         with tab_cast:
+            st.markdown("**ボイス割り当て**")
             st.caption("キャラ名とボイスIDの割り当て（行の追加・削除・編集ができます）")
             ver = st.session_state.get("cast_ver", 0)
             rows = [{"キャラ": n, "voice_id": d.get("voice_id", ""),
@@ -506,6 +505,18 @@ def main() -> None:
                 st.rerun()
             st.caption("空欄のキャラは生成対象から外れます。変更はプロジェクト保存に含まれます。")
 
+            st.divider()
+            st.markdown("**基本トーン（感情）**")
+            st.caption("タグが無いセリフに自動付与される、キャラごとの感情")
+            label_to_tag = {lab: tag for lab, tag in TAG_CHOICES}
+            tone_opts = ["なし"] + [lab for lab, _ in TAG_CHOICES]
+            for name in char_names:
+                sel = st.selectbox(name, tone_opts, key=f"chartone_sel_{name}")
+                st.session_state[f"chartone_{name}"] = (
+                    "" if sel == "なし" else label_to_tag.get(sel, ""))
+            if not char_names:
+                st.caption("（割当済みキャラがありません）")
+
         with tab_hist:
             hist = st.session_state.get("history", [])
             if not hist:
@@ -519,7 +530,7 @@ def main() -> None:
                     st.audio(h["audio"], format="audio/mp3")
 
         with tab_proj:
-            st.caption("台本＋設定（整音/速度/キャラ別感情）を1プロジェクトとして保存")
+            st.markdown("**📂 プロジェクト**（VSのソリューションのように開閉）")
             proj_name = st.text_input("プロジェクト名", key="proj_name",
                                       placeholder="例: ななしちゃん第1話")
             proj_settings = {
@@ -532,11 +543,57 @@ def main() -> None:
             proj = _build_project(proj_name, _project_pairs(), proj_settings, cast)
             fbase = re.sub(r"[^0-9A-Za-z぀-ヿ一-鿿_-]+", "_", proj["name"])[:40] or "project"
 
-            st.download_button("⬇️ 台本＋設定を保存（JSON）",
-                               json.dumps(proj, ensure_ascii=False, indent=2),
-                               file_name=f"{fbase}.json", mime="application/json",
-                               use_container_width=True, key="proj_dl")
+            gh_token = _secret("GITHUB_TOKEN")
+            gh_repo = _secret("GITHUB_REPO", "shinonomeheta-ai/manga-voice")
+            store = None
+            if gh_token:
+                from src import store_github as gh_mod
+                store = gh_mod.GitHubStore(gh_token, gh_repo)
 
+            # --- ☁️ クラウドのプロジェクトを開く/保存（ソリューション風） ---
+            st.caption("☁️ クラウド（GitHub）— 別端末・友達と共有")
+            if store is None:
+                st.caption("※ Secrets に GITHUB_TOKEN（Contents 読み書き）を追加すると有効")
+            else:
+                try:
+                    names = store.list_projects()
+                except Exception as e:  # noqa: BLE001
+                    names = []
+                    st.error(f"一覧の取得に失敗: {e}")
+                if names:
+                    pick = st.selectbox("保存済みプロジェクトを開く", names, key="gh_pick")
+                    c1, c2 = st.columns([3, 1])
+                    if c1.button("📂 開く", use_container_width=True, key="gh_load"):
+                        try:
+                            with st.spinner("GitHubから読み込み中…"):
+                                data = store.load_project(pick)
+                            _restore_project(data)
+                            st.success(f"「{data.get('name', pick)}」を開きました。")
+                            st.rerun()
+                        except Exception as e:  # noqa: BLE001
+                            st.error(f"クラウド読み込みに失敗: {e}")
+                    if c2.button("🗑", use_container_width=True, key="gh_del", help="削除"):
+                        try:
+                            store.delete_project(pick)
+                            st.success("削除しました。")
+                            st.rerun()
+                        except Exception as e:  # noqa: BLE001
+                            st.error(f"削除に失敗: {e}")
+                else:
+                    st.caption("（まだクラウドに保存がありません）")
+                if st.button("💾 このプロジェクトをクラウドに保存", use_container_width=True,
+                             key="gh_save", disabled=not proj["blocks"]):
+                    try:
+                        with st.spinner("GitHubに保存中…"):
+                            store.save_project(proj["name"], proj)
+                        st.success(f"クラウドに保存しました（{proj['name']}）。")
+                        st.rerun()
+                    except Exception as e:  # noqa: BLE001
+                        st.error(f"クラウド保存に失敗: {e}")
+
+            # --- ローカル（ファイル）で保存/読み込み ---
+            st.divider()
+            st.caption("ローカル（ファイル）に保存・読み込み")
             # 音声込みZIP: 生成済みの全部つなげ音声＋各ブロックの2版をまとめる
             audio_files: list[tuple[str, bytes]] = []
             if st.session_state.get("audio_all"):
@@ -550,7 +607,11 @@ def main() -> None:
                 if st.session_state.get(f"audioW_{b}"):
                     audio_files.append((f"{pos+1:02d}_{safe}_warm.mp3",
                                         st.session_state[f"audioW_{b}"]))
-            st.download_button("⬇️ 音声込みで保存（ZIP）",
+            d1, d2 = st.columns(2)
+            d1.download_button("⬇️ JSON", json.dumps(proj, ensure_ascii=False, indent=2),
+                               file_name=f"{fbase}.json", mime="application/json",
+                               use_container_width=True, key="proj_dl")
+            d2.download_button("⬇️ 音声込みZIP",
                                _project_zip(proj, audio_files) if audio_files else b"",
                                file_name=f"{fbase}.zip", mime="application/zip",
                                use_container_width=True, key="proj_zip",
@@ -558,18 +619,12 @@ def main() -> None:
                                help="生成済みの音声(全部つなげ＋各ブロック2版)と台本をまとめます")
             if not audio_files:
                 st.caption("※ 音声を生成するとZIP保存が有効になります")
-
-            st.divider()
-            upj = st.file_uploader("📂 読み込み（JSON / ZIP）", type=["json", "zip"], key="proj_up")
+            upj = st.file_uploader("📂 ファイルから開く（JSON / ZIP）", type=["json", "zip"],
+                                   key="proj_up")
             if upj is not None and st.button("読み込む", use_container_width=True, key="proj_load"):
                 try:
                     data = _parse_project(upj.name, upj.getvalue())
-                    _set_blocks([(b.get("speaker", ""), b.get("text", ""))
-                                 for b in data.get("blocks", [])])
-                    st.session_state["_pending_settings"] = _settings_to_state(
-                        data.get("settings", {}))
-                    if data.get("characters"):  # キャスト(キャラ→ID)も復元
-                        st.session_state["_pending_cast"] = data["characters"]
+                    _restore_project(data)
                     st.success(f"「{data.get('name', 'project')}」を読み込みました。")
                     st.rerun()
                 except Exception as e:  # noqa: BLE001
