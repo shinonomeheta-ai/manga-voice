@@ -509,6 +509,7 @@ def main() -> None:
         st.session_state["block_ids"] = [0]
         st.session_state["block_seq"] = 1
         st.session_state["proj_name"] = ""
+        st.session_state["_flash_main"] = "新規プロジェクトを作成しました（台本をクリア）。"
 
     api_key = _secret("ELEVENLABS_API_KEY")
     if not api_key:
@@ -525,7 +526,7 @@ def main() -> None:
         gh_store = gh_mod.GitHubStore(
             _secret("GITHUB_TOKEN"), _secret("GITHUB_REPO", "shinonomeheta-ai/manga-voice"))
 
-    # キャスト(キャラ→ボイスID)。初回は「既定キャスト(クラウド)」→無ければ characters.json。
+    # キャスト(キャラ→ボイスID/トーン)。初回は「既定(クラウド)」→無ければ characters.json。
     book = CharacterBook.load()
     if "cast" not in st.session_state:
         seeded = None
@@ -534,7 +535,16 @@ def main() -> None:
                 seeded = gh_store.load_cast()
             except Exception:  # noqa: BLE001 - クラウド未設定/失敗でも起動する
                 seeded = None
-        if not seeded:
+        if seeded:
+            # クラウド既定: 基本トーンを分離して chartone_sel に種付け(ウィジェット前)
+            for n, d in seeded.items():
+                tone = (d or {}).get("tone", "")
+                if tone and f"chartone_sel_{n}" not in st.session_state:
+                    st.session_state[f"chartone_sel_{n}"] = _tag_to_label(tone)
+            seeded = {n: {"voice_id": (d or {}).get("voice_id", ""),
+                          "stability": (d or {}).get("stability", "natural")}
+                      for n, d in seeded.items()}
+        else:
             seeded = {n: {"voice_id": c.voice_id, "stability": c.stability}
                       for n, c in book.characters.items() if c.is_assigned()}
         st.session_state["cast"] = seeded
@@ -557,6 +567,15 @@ def main() -> None:
         with st.spinner("クラウドに保存中…"):
             gh_store.save_project(p["name"], p)
         return p["name"]
+
+    def _save_default_cast() -> None:
+        """ボイスID＋安定性＋基本トーンを、サイト共通の既定キャストとして保存。"""
+        blob = {n: {"voice_id": d.get("voice_id", ""),
+                    "stability": d.get("stability", "natural"),
+                    "tone": st.session_state.get(f"chartone_{n}", "")}
+                for n, d in st.session_state["cast"].items()}
+        with st.spinner("既定として保存中…"):
+            gh_store.save_cast(blob)
 
     if "block_ids" not in st.session_state:
         st.session_state.block_ids = [0]
@@ -629,13 +648,12 @@ def main() -> None:
                 st.session_state["cast"] = new_cast
                 st.rerun()
             st.caption("空欄のキャラは生成対象から外れます。変更はプロジェクト保存に含まれます。")
-            if st.button("💾 この割り当てを既定として保存", use_container_width=True,
+            if st.button("💾 ボイス割り当てを既定として保存", use_container_width=True,
                          key="cast_save_default", disabled=gh_store is None,
-                         help="サイト共通の既定キャストとして保存。次回・新規でも自動で読み込まれます"):
+                         help="ボイスID＋安定性＋基本トーンをサイト共通の既定として保存"):
                 try:
-                    with st.spinner("既定キャストを保存中…"):
-                        gh_store.save_cast(st.session_state["cast"])
-                    st.success("既定キャストとして保存しました（次回から自動で読み込まれます）。")
+                    _save_default_cast()
+                    st.success("既定として保存しました（次回・新規でも自動で読み込まれます）。")
                 except Exception as e:  # noqa: BLE001
                     st.error(f"保存に失敗: {e}")
             if gh_store is None:
@@ -652,6 +670,14 @@ def main() -> None:
                     "" if sel == "なし" else label_to_tag.get(sel, ""))
             if not char_names:
                 st.caption("（割当済みキャラがありません）")
+            if st.button("💾 基本トーンを既定として保存", use_container_width=True,
+                         key="tone_save_default", disabled=gh_store is None,
+                         help="ボイスID＋安定性＋基本トーンをサイト共通の既定として保存"):
+                try:
+                    _save_default_cast()
+                    st.success("既定として保存しました（次回・新規でも自動で読み込まれます）。")
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"保存に失敗: {e}")
 
         with tab_hist:
             hist = st.session_state.get("history", [])
