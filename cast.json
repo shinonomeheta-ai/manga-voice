@@ -1,0 +1,30 @@
+{
+  "ナレーター": {
+    "voice_id": "deKmbWEKZdwxcKxxcfvP",
+    "stability": "robust"
+  },
+  "桐原": {
+    "voice_id": "4sirbXwrtRlmPV80MJkQ",
+    "stability": "robust"
+  },
+  "九頭竜": {
+    "voice_id": "8FuuqoKHuM48hIEwni5e",
+    "stability": "natural"
+  },
+  "悪い人": {
+    "voice_id": "H8ZPDxbrPcks5hEsi2fq",
+    "stability": "natural"
+  },
+  "もぶ": {
+    "voice_id": "LIisRj2veIKEBdr6KZ5y",
+    "stability": "natural"
+  },
+  "あかり": {
+    "voice_id": "ugYcuAusTuWCSOpJD0Xd",
+    "stability": "creative"
+  },
+  "ななし": {
+    "voice_id": "ngvNHfiCrXLPAHcTrZK1",
+    "stability": "robust"
+  }
+}
