@@ -75,3 +75,30 @@ def test_transcription_uses_cheaper_model(monkeypatch):
         pass
     assert captured["model"] == app.TRANSCRIBE_MODEL == "claude-haiku-4-5"
     assert settings.model == "claude-opus-4-8"  # 元の設定は不変
+
+
+def test_analyze_images_batches_and_merges(monkeypatch):
+    """画像が多いと batch 枚ずつに分割して解析し、結果を1本に結合する(413回避)。"""
+    import importlib
+    from pathlib import Path
+
+    import src.analyze as analyze_mod
+    from src.config import Settings
+    from src.models import Line, Scene, Script
+
+    app = importlib.import_module("streamlit_app")
+    calls = {"n": 0}
+
+    def fake_analyze(settings, inputs_dir, **kwargs):
+        calls["n"] += 1
+        n_imgs = len(list(Path(inputs_dir).glob("page_*")))
+        assert n_imgs <= 6  # 1バッチは batch 枚以下
+        return Script(scenes=[Scene(id=f"s{calls['n']}",
+                                    lines=[Line(speaker="X", text=f"b{calls['n']}")])])
+
+    monkeypatch.setattr(analyze_mod, "analyze", fake_analyze)
+    settings = Settings(anthropic_api_key="x", elevenlabs_api_key="y")
+    items = [(".png", b"img-%d" % i) for i in range(13)]
+    script = app._analyze_images(settings, items, batch=6)
+    assert calls["n"] == 3            # 13枚 → 6+6+1 = 3バッチ
+    assert len(script.scenes) == 3    # 分割結果が結合されている

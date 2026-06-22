@@ -170,27 +170,57 @@ def _gen_block(settings: Settings, chars: dict, bid: int) -> None:
         prog.empty()
 
 
-def _analyze_images(settings: Settings, items: list[tuple[str, bytes]]):
-    """漫画画像(拡張子, バイト列)を Claude Vision で解析し Script を返す。
+def _shrink_image(data: bytes, max_edge: int = 1568, quality: int = 85) -> tuple[bytes, str]:
+    """送信サイズ削減のため画像を長辺max_edgeに縮小しJPEG化する(失敗時は元データ)。
+
+    漫画スキャンは高解像度で、全画像を1リクエストに載せると413(大きすぎ)になる。
+    文字起こしには長辺1568pxで十分(Haikuでも読める)。
+    """
+    try:
+        from PIL import Image
+
+        im = Image.open(io.BytesIO(data)).convert("RGB")
+        im.thumbnail((max_edge, max_edge))
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=quality)
+        return buf.getvalue(), ".jpg"
+    except Exception:  # noqa: BLE001 - PIL無し/壊れ画像でも止めない
+        return data, ".png"
+
+
+def _analyze_images(settings: Settings, items: list[tuple[str, bytes]], batch: int = 6):
+    """漫画画像を Claude Vision で解析し Script を返す(縮小+分割でサイズ上限を回避)。
 
     文字起こし(画像/Notion)は安価な Haiku で十分なため、ここだけ TRANSCRIBE_MODEL
     にモデルを差し替える。APIキーは共有のまま、TTS など他の処理には影響しない。
+    画像は送信前に縮小し、batch 枚ずつに分けて解析→結合する(413 request_too_large 回避)。
     """
     import dataclasses
 
     from src import assets as assets_mod
     from src.analyze import analyze as analyze_inputs
     from src.config import ASSETS_DIR, CharacterBook
+    from src.models import Script
 
     settings = dataclasses.replace(settings, model=TRANSCRIBE_MODEL)
-    with tempfile.TemporaryDirectory() as d:
-        for k, (ext, data) in enumerate(items):
-            (Path(d) / f"page_{k:03d}{(ext or '.png').lower()}").write_bytes(data)
-        book = CharacterBook.load()
-        bible = assets_mod.load_character_bible(ASSETS_DIR, book)
-        # 文字起こしは固まらないよう短めのタイムアウトで上限化(失敗は即エラー表示)。
-        return analyze_inputs(settings, Path(d), language=book.language,
-                              character_bible=bible, timeout=120.0, max_retries=1)
+    book = CharacterBook.load()
+    bible = assets_mod.load_character_bible(ASSETS_DIR, book)
+    shrunk = [_shrink_image(data) for (_ext, data) in items]
+
+    step = max(1, batch)
+    combined: Script | None = None
+    for start in range(0, len(shrunk), step):
+        with tempfile.TemporaryDirectory() as d:
+            for k, (data, ext) in enumerate(shrunk[start:start + step]):
+                (Path(d) / f"page_{start + k:03d}{ext}").write_bytes(data)
+            # 文字起こしは固まらないよう短めのタイムアウトで上限化(失敗は即エラー表示)。
+            script = analyze_inputs(settings, Path(d), language=book.language,
+                                    character_bible=bible, timeout=120.0, max_retries=1)
+        if combined is None:
+            combined = script
+        else:
+            combined.scenes.extend(script.scenes)  # 分割結果を1本に結合
+    return combined if combined is not None else Script(language=book.language)
 
 
 def _lines_of(script, char_names: list[str]) -> list[tuple[str, str]]:
