@@ -427,7 +427,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     ensure_dirs()
     settings = load_settings(model=args.model)
-    args.func(args, settings)
+    try:
+        args.func(args, settings)
+    except notion_mod.NotionError as e:
+        print(f"Notion取り込みエラー: {e}", file=sys.stderr)
+        return 1
     return 0
 
 

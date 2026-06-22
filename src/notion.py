@@ -41,6 +41,14 @@ IMAGE_EXT_BY_CT = {
 }
 
 
+class NotionError(RuntimeError):
+    """Notion取り込みの失敗。通常の例外なので呼び出し側の except Exception で捕捉可能。
+
+    以前は SystemExit を投げていたが、Webアプリの except Exception をすり抜けて
+    エラーが表示されない(進捗バーだけ消える)問題があったため通常例外に変更。
+    """
+
+
 def extract_page_id(url_or_id: str) -> str:
     """NotionのURL/IDから32桁hexを取り出しダッシュ付きUUIDに整形する。
 
@@ -50,7 +58,7 @@ def extract_page_id(url_or_id: str) -> str:
     s = url_or_id.strip().split("?")[0].split("#")[0]
     hex_chars = re.findall(r"[0-9a-fA-F]", s)
     if len(hex_chars) < 32:
-        raise SystemExit(f"Notion ページID/URL を解釈できません: {url_or_id}")
+        raise NotionError(f"Notion ページID/URL を解釈できません: {url_or_id}")
     h = "".join(hex_chars[-32:]).lower()
     return f"{h[0:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:32]}"
 
@@ -69,7 +77,7 @@ class NotionClient:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace")
-            raise SystemExit(
+            raise NotionError(
                 f"Notion API エラー {e.code} ({path}): {body}\n"
                 f"トークンが正しいか、対象ページをインテグレーションに共有済みか確認してください。"
             )

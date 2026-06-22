@@ -1,6 +1,6 @@
 import pytest
 
-from src.notion import extract_page_id
+from src.notion import NotionError, extract_page_id
 
 
 @pytest.mark.parametrize("raw,expected", [
@@ -22,5 +22,17 @@ def test_extract_page_id_strips_title_hex_letters():
 
 
 def test_extract_page_id_invalid():
-    with pytest.raises(SystemExit):
+    with pytest.raises(NotionError):
         extract_page_id("no-hex-here")
+
+
+def test_notion_error_is_catchable_as_exception():
+    """NotionError は通常の Exception。Webアプリの except Exception で捕捉でき、
+    SystemExit のように握りつぶされない(進捗バーだけ消える問題の再発防止)。"""
+    assert issubclass(NotionError, Exception)
+    try:
+        extract_page_id("invalid")
+    except Exception as e:  # noqa: BLE001
+        assert isinstance(e, NotionError)
+    else:
+        pytest.fail("NotionError が送出されませんでした")
