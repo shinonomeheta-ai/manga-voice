@@ -28,6 +28,42 @@ _PAGE = re.compile(r"^#{2,4}\s*P(\d+)\b", re.M)
 _H1_TITLE = re.compile(r"^#\s*(.+)$", re.M)
 
 
+# 読み物形式: 行頭「話者名「セリフ」」を話者×セリフに分解するための正規表現。
+_SCRIPT_DLG = re.compile(r"^\s*([^「」【】\n]{1,20}?)\s*[:：]?\s*「(.+)」\s*[。.!！?？]?\s*$")
+
+
+def parse_script(md: str) -> dict:
+    """読み物形式の台本(話者「…」＋地の文)を scenario(話者×セリフ)へ変換する。
+
+    - 行頭「話者名「セリフ」」→ そのキャラのセリフ。
+    - それ以外の本文行(地の文・ナレーション)→ ナレーター。
+    - 見出し/メタ/監修メモ/箇条書きは除外。
+    生成側 OUTPUT_SPEC(読み物形式)の出力をそのまま音声化に繋ぐためのパーサ。
+    """
+    out: list[dict] = []
+    in_memo = False
+    for raw in _lines(md):
+        line = raw.strip()
+        if not line:
+            continue
+        if re.match(r"^#{1,6}\s", line):  # 見出し
+            in_memo = "監修メモ" in line
+            continue
+        if in_memo:
+            continue
+        if line.startswith(("---", "**", "- ", "* ", ">")):  # 区切り/メタ/箇条書き/引用
+            continue
+        m = _SCRIPT_DLG.match(line)
+        if m:
+            speaker = re.sub(r"[（(].*?[)）]", "", m.group(1)).strip()  # （焦って）等を除去
+            out.append({"speaker": speaker or "ナレーター", "text": m.group(2).strip()})
+        else:
+            out.append({"speaker": "ナレーター", "text": line})
+    scenes = [{"id": "S1", "setting": "", "lines": out}] if out else []
+    return {"version": "1.0", "title": _title(md), "logline": "",
+            "language": "ja", "characters": [], "scenes": scenes}
+
+
 def parse_neme(md: str) -> tuple[dict, list[dict]]:
     """ネーム markdown を (scenario_dict, art_brief_pages) に変換する。"""
     title = _title(md)

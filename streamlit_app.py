@@ -458,8 +458,11 @@ def _import_dialog(settings: Settings, char_names: list[str]) -> None:
         if st.button("台本(md)→反映", use_container_width=True, key="dlg_tr_md",
                      disabled=not (md or "").strip()):
             try:
-                from src.scenario_ingest import parse_neme
-                scenario, _ = parse_neme(md)
+                from src.scenario_ingest import parse_neme, parse_script
+                # 読み物形式(話者「…」)を優先。ダメならコマ形式(ネーム)で解析。
+                scenario = parse_script(md)
+                if not any(s["lines"] for s in scenario["scenes"]):
+                    scenario, _ = parse_neme(md)
                 pairs = [(_match_speaker(ln["speaker"], char_names), ln["text"])
                          for s in scenario["scenes"] for ln in s["lines"]]
                 if not pairs:
