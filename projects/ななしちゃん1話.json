@@ -1,7 +1,7 @@
 {
   "version": 3,
   "name": "ななしちゃん1話",
-  "saved_at": "2026-06-28T16:22:56",
+  "saved_at": "2026-06-28T16:40:36",
   "settings": {
     "preset": "natural",
     "speed": 1.0,
@@ -356,60 +356,44 @@
       "text": "[calm] これでもまだ店舗の遠隔操作を疑うのであれば"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "桐原",
+      "text": "[calm] 関係者のメリット、デメリット導入時のキャッシュフローを想像して現実にあり得るか考えてみてほしい"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "ななし",
+      "text": "[surprised] へぇ遠隔操作って当てるためのものだったんですね"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "桐原",
+      "text": "[calm] 全部とは言わない、だが多くの摘発事例で見つかったものは基本的に当てる為だった"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "あかり",
+      "text": "[sad] え…じゃあ…私がいつも負けてるのは…"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "ななし",
+      "text": "[気まずそうに]実力…ということになるね"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "あかり",
+      "text": "[cheerful] そっか！！じゃあ次は勝てるかも！"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "あかり",
+      "text": "[cheerful] ありがとう、桐原さん！ななしちゃん！"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "桐原",
+      "text": "[calm] えんかくはないと言える"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "桐原",
+      "text": "[serious] だが…"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
-    },
-    {
-      "speaker": "ナレーター",
-      "text": ""
-    },
-    {
-      "speaker": "ナレーター",
-      "text": ""
-    },
-    {
-      "speaker": "ナレーター",
-      "text": ""
-    },
-    {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "桐原",
+      "text": "[serious] 客が負け続ける理由は変わらずある"
     }
   ]
 }
