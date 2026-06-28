@@ -1,7 +1,7 @@
 {
   "version": 3,
   "name": "ななしちゃん1話",
-  "saved_at": "2026-06-28T16:40:36",
+  "saved_at": "2026-06-28T17:12:32",
   "settings": {
     "preset": "natural",
     "speed": 1.0,
@@ -40,64 +40,64 @@
   },
   "blocks": [
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "ななし",
+      "text": "[不安げに]あかりちゃん…どこにいるの…"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "ななし",
+      "text": "[nervous] ん…あれは…？"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "ななし",
+      "text": "[excited] わー！懐かしい！"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "ななし",
+      "text": "[happy] 子供の時ずっと見てたな～！"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "ななし",
+      "text": "[happy] こんなのもパチンコになってるんだ"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "ななし",
+      "text": "[excited] 今度打ってみてもいいかも"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "ななし",
+      "text": "[surprised] あ！あかりさん…！？"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "ななし",
+      "text": "[ツッコミっぽく] パチンコで有り金溶かした人の顔してる！"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "ななし",
+      "text": "[excited] あかりちゃん！"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "あかり",
+      "text": "[whispers] して？"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "あかり",
+      "text": "[sad] お金貸して！１万でいいから！"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "ななし",
+      "text": "[困りながら]でも友達同士でお金を貸すのは"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "ななし",
+      "text": "[warm] もっとお金の掛からない楽しい趣味を探した方がいいよ"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "あかり",
+      "text": "[excited] パチンコ以上に楽しい趣味って何ですか？"
     },
     {
-      "speaker": "ナレーター",
-      "text": ""
+      "speaker": "ななし",
+      "text": "[angry] [呆れて]ダメだこいつ…早くなんとかしないと…"
     },
     {
       "speaker": "ナレーター",
